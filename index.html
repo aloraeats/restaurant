@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Restaurant Manager</title>
+
+    <!--
+      Content Security Policy
+      TODO: Replace with your actual Supabase project ID
+      TODO: Add your GitHub Pages domain to connect-src
+    -->
+    <meta http-equiv="Content-Security-Policy"
+          content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src 'self' https://fonts.gstatic.com;
+        img-src 'self' data: blob: https://*.supabase.co;
+        connect-src 'self'
+          https://*.supabase.co
+          wss://*.supabase.co
+          https://api.paystack.co
+          https://checkout.paystack.com;
+        frame-src https://checkout.paystack.com;
+      " />
+
+    <!-- GitHub Pages SPA redirect handler -->
+    <script>
+        // Pick up the redirect path stored by 404.html
+        var redirect = sessionStorage.getItem('redirect');
+        if (redirect && redirect !== '/') {
+            sessionStorage.removeItem('redirect');
+            // Replace current history entry with the intended path
+            window.history.replaceState(null, null, redirect);
+        }
+    </script>
+
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

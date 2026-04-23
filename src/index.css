@@ -1,0 +1,49 @@
+/* ============================================================
+   index.css
+   Tailwind directives + minimal global styles
+   ============================================================ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    /* Ghana-inspired font — feel free to swap */
+    body {
+        @apply bg-gray-50 text-gray-900 antialiased;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+    }
+
+    /* Smooth scrolling everywhere */
+    html {
+        scroll-behavior: smooth;
+    }
+
+    /* Better focus rings for accessibility */
+    *:focus-visible {
+        @apply outline-2 outline-offset-2 outline-green-500;
+    }
+}
+
+@layer components {
+    /* Reusable card base */
+    .card {
+        @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+    }
+
+    /* Page container */
+    .page-container {
+        @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8;
+    }
+}
+
+@layer utilities {
+    /* Hide scrollbar but keep scroll functionality */
+    .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+}
