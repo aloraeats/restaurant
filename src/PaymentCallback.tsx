@@ -1,8 +1,8 @@
-// ============================================================
+// ===========================================================
 // PaymentCallback.tsx
 // Handles return from Paystack checkout
 // Polls subscription status until active or timeout
-// ============================================================
+// ===========================================================
 
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
