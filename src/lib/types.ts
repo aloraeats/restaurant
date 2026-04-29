@@ -1,7 +1,13 @@
 // ============================================================
 // types.ts
-// All existing types preserved exactly.
-// New billing tier types added at the bottom.
+// Updated for pure 1% usage billing model.
+// Removed: BillingTier, TierConfig, BILLING_TIERS,
+//          getTierFromBranchCount, calculateFlatFee,
+//          trial_ends_at, billing_tier, trial_days,
+//          InitiatePaymentResponse (no more initiate-payment)
+// Added:   next_invoice_date on Organization,
+//          PayInvoiceResponse,
+//          InvoiceSummary (for dashboard display)
 // ============================================================
 
 // ── Database Row Types ────────────────────────────────────────
@@ -10,14 +16,12 @@ export interface Organization {
     id: string;
     name: string;
     subscription_status: SubscriptionStatus;
-    trial_ends_at: string;
+    next_invoice_date: string | null; // DATE from DB, null if not set yet
     created_at: string;
-    // ✅ New columns from migration 008
-    billing_tier: BillingTier;
-    trial_days: number;
 }
 
-export type SubscriptionStatus = "trial" | "active" | "suspended" | "expired";
+// No more 'trial' — active → suspended → expired
+export type SubscriptionStatus = "active" | "suspended" | "expired";
 
 export interface Profile {
     id: string;
@@ -31,6 +35,8 @@ export interface Profile {
 
 export type OrgRole = "super_admin" | "manager" | "staff";
 
+// Subscriptions table still exists in DB but is no longer
+// used for billing. Keeping type here for future use.
 export interface Subscription {
     id: string;
     org_id: string;
@@ -158,80 +164,49 @@ export interface AuditLog {
     created_at: string;
 }
 
-// ── NEW: Monthly invoice type ─────────────────────────────────
+// ── Monthly Invoice ───────────────────────────────────────────
+// Core billing type — generated every 30 days per org
+// flat_fee_* columns kept in DB as zeros (Option B decision)
+// Only usage_fee_total and amount_due matter now
+
 export interface MonthlyInvoice {
     id: string;
     org_id: string;
-    period_start: string;
-    period_end: string;
-    branch_count: number;
-    flat_fee_per_branch: number;
-    flat_fee_total: number;
-    total_qr_orders: number;
-    total_qr_gmv: number;
-    usage_fee_percent: number;
-    usage_fee_total: number;
-    amount_due: number;
+    period_start: string;       // DATE: start of 30-day period
+    period_end: string;         // DATE: end of 30-day period
+    branch_count: number;       // always 0 in new model
+    flat_fee_per_branch: number; // always 0 in new model
+    flat_fee_total: number;     // always 0 in new model
+    total_qr_orders: number;    // count of served orders
+    total_qr_gmv: number;       // sum of served order totals
+    usage_fee_percent: number;  // always 1.0
+    usage_fee_total: number;    // total_qr_gmv × 0.01
+    amount_due: number;         // = usage_fee_total
     status: InvoiceStatus;
     paystack_reference: string | null;
-    payment_link: string | null;
+    payment_link: string | null; // null — pay button in dashboard only
     paid_at: string | null;
-    due_date: string;
+    due_date: string;           // period_end + 7 days
     created_at: string;
     updated_at: string;
 }
 
 export type InvoiceStatus = "unpaid" | "paid" | "overdue" | "waived";
 
-// ── NEW: Billing tier types ───────────────────────────────────
-export type BillingTier = "starter" | "growth" | "enterprise";
-
-export interface TierConfig {
-    label: string;
-    flat_per_branch: number;  // GH₵ per branch per month
-    usage_percent: number;  // % of QR order value
-    branch_range: string;  // human readable
-    color: string;  // tailwind classes for badge
-}
-
-// Single source of truth for tier pricing
-// Used in frontend components AND edge functions
-export const BILLING_TIERS: Record<BillingTier, TierConfig> = {
-    starter: {
-        label: "Starter",
-        flat_per_branch: 500,
-        usage_percent: 1,
-        branch_range: "1 branch",
-        color: "bg-blue-100 text-blue-700",
-    },
-    growth: {
-        label: "Growth",
-        flat_per_branch: 1200,
-        usage_percent: 1,
-        branch_range: "2–5 branches",
-        color: "bg-purple-100 text-purple-700",
-    },
-    enterprise: {
-        label: "Enterprise",
-        flat_per_branch: 2000,
-        usage_percent: 1,
-        branch_range: "6+ branches",
-        color: "bg-orange-100 text-orange-700",
-    },
-} as const;
-
-// Derive tier from branch count — mirrors DB function
-export function getTierFromBranchCount(count: number): BillingTier {
-    if (count >= 6) return "enterprise";
-    if (count >= 2) return "growth";
-    return "starter";
-}
-
-// Calculate flat fee for a given branch count
-export function calculateFlatFee(branchCount: number): number {
-    const tier = getTierFromBranchCount(branchCount);
-    const config = BILLING_TIERS[tier];
-    return config.flat_per_branch * branchCount;
+// Lightweight version for dashboard invoice list
+// Returned by supabase select with specific columns
+export interface InvoiceSummary {
+    id: string;
+    period_start: string;
+    period_end: string;
+    total_qr_orders: number;
+    total_qr_gmv: number;
+    usage_fee_total: number;
+    amount_due: number;
+    status: InvoiceStatus;
+    due_date: string;
+    paid_at: string | null;
+    paystack_reference: string | null;
 }
 
 // ── Joined / Enriched Types ───────────────────────────────────
@@ -312,14 +287,13 @@ export interface CreateStaffResponse {
     message: string;
 }
 
-// ✅ Updated — matches new pricing model
-export interface InitiatePaymentResponse {
-    authorization_url: string;
+// Returned by pay-invoice edge function
+// User clicks "Pay" on dashboard → gets redirected to Paystack
+export interface PayInvoiceResponse {
+    authorization_url: string; // redirect here
     reference: string;
-    flat_fee: number;
-    branch_count: number;
-    billing_tier: BillingTier;
-    subscription_id: string;
+    amount_due: number;
+    invoice_id: string;
 }
 
 export interface RegenerateQrResponse {
@@ -335,14 +309,19 @@ export interface EdgeFunctionError {
     message: string;
 }
 
-// ── NEW: Invoice response from generate-invoice function ──────
+// Returned by generate-invoice edge function
+// Used for manual trigger + cron result logging
 export interface GenerateInvoiceResponse {
     invoices_generated: number;
+    skipped: number;
+    failed: number;
+    period: string;
     results: Array<{
         org_id: string;
         org_name: string;
-        amount_due: number;
-        status: string;
+        amount_due?: number;
+        status: "created" | "skipped" | "failed";
+        reason?: string;
     }>;
 }
 
@@ -441,12 +420,18 @@ export interface Database {
             };
             branch_inventory: {
                 Row: BranchInventory;
-                Insert: Omit<BranchInventory, "id" | "created_at" | "updated_at">;
+                Insert: Omit<
+                    BranchInventory,
+                    "id" | "created_at" | "updated_at"
+                >;
                 Update: Partial<Omit<BranchInventory, "id" | "created_at">>;
             };
             restaurant_tables: {
                 Row: RestaurantTable;
-                Insert: Omit<RestaurantTable, "id" | "created_at" | "qr_identifier">;
+                Insert: Omit<
+                    RestaurantTable,
+                    "id" | "created_at" | "qr_identifier"
+                >;
                 Update: Partial<Omit<RestaurantTable, "id" | "created_at">>;
             };
             orders: {
@@ -464,10 +449,12 @@ export interface Database {
                 Insert: Omit<AuditLog, "id" | "created_at">;
                 Update: never;
             };
-            // ✅ New table
             monthly_invoices: {
                 Row: MonthlyInvoice;
-                Insert: Omit<MonthlyInvoice, "id" | "created_at" | "updated_at">;
+                Insert: Omit<
+                    MonthlyInvoice,
+                    "id" | "created_at" | "updated_at"
+                >;
                 Update: Partial<Omit<MonthlyInvoice, "id" | "created_at">>;
             };
         };
@@ -488,14 +475,8 @@ export interface Database {
                 Args: Record<string, never>;
                 Returns: string;
             };
-            get_billing_tier: {
-                Args: { p_branch_count: number };
-                Returns: string;
-            };
-            get_flat_fee_per_branch: {
-                Args: { p_tier: string };
-                Returns: number;
-            };
+            // get_billing_tier and get_flat_fee_per_branch removed
+            // — functions dropped in migration 009
         };
     };
 }

@@ -9,7 +9,6 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { supabase } from "../lib/supabase";
 import SubscriptionCard from "../components/SubscriptionCard";
-import PaymentModal from "../components/PaymentModal";
 import { Spinner, Badge, EmptyState } from "../components/UI";
 import {
     formatCurrency,
@@ -20,7 +19,7 @@ import {
 } from "../utils/helpers";
 import type { Branch, Order, SetupStep } from "../lib/types";
 
-// ── Stat card ─────────────────────────────────────────────────
+// ✅ Fixed StatCard — handles any number size
 function StatCard({
     label, value, icon, sub,
 }: {
@@ -30,12 +29,23 @@ function StatCard({
     sub?: string;
 }) {
     return (
-        <div className="card flex items-start gap-4">
-            <div className="text-3xl">{icon}</div>
-            <div>
-                <p className="text-2xl font-bold text-gray-900">{value}</p>
-                <p className="text-sm text-gray-500">{label}</p>
-                {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+        <div className="card flex items-start gap-3 overflow-hidden">
+            {/* flex-shrink-0 stops icon squishing when number is long */}
+            <div className="text-2xl flex-shrink-0">{icon}</div>
+            {/* min-w-0 is CRITICAL — allows flex child to shrink */}
+            <div className="min-w-0 flex-1">
+                <p className="text-xl font-bold text-gray-900
+                              break-words leading-tight">
+                    {value}
+                </p>
+                <p className="text-sm text-gray-500 mt-0.5">
+                    {label}
+                </p>
+                {sub && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                        {sub}
+                    </p>
+                )}
             </div>
         </div>
     );
@@ -260,11 +270,7 @@ export default function Dashboard() {
                         org={org}
                         onPayClick={() => setPaymentOpen(true)}
                     />
-                    <PaymentModal
-                        open={paymentOpen}
-                        onClose={() => setPaymentOpen(false)}
-                        org={org}
-                    />
+                    
                 </>
             )}
 

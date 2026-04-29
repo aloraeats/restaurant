@@ -117,7 +117,7 @@ export function useCart(qrIdentifier: string): UseCartReturn {
         setItems((prev) =>
             prev.map((i) =>
                 i.product_id === productId
-                    ? { ...i, notes: notes.trim() || undefined }
+                    ? { ...i, notes: notes || undefined }
                     : i
             )
         );

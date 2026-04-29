@@ -1,29 +1,40 @@
 // ============================================================
 // helpers.ts
 // Pure utility functions — no Supabase, no React, no side effects
-// Easy to unit test!
 // ============================================================
 
 import type { OrderStatus, SubscriptionStatus } from "../lib/types";
 
 // ── Currency ──────────────────────────────────────────────────
 
-// Format a number as GH₵ currency
-// formatCurrency(65) → "GH₵65.00"
+// Format a number as GH₵ currency with proper comma separators
+// formatCurrency(65)       → "GH₵65.00"
+// formatCurrency(100000)   → "GH₵100,000.00"  ✅ no overflow
+// formatCurrency(1500000)  → "GH₵1,500,000.00" ✅ handles millions
 export function formatCurrency(amount: number): string {
-    return `GH₵${amount.toFixed(2)}`;
+    if (amount === null || amount === undefined || isNaN(amount)) {
+        return "GH₵0.00";
+    }
+
+    // Intl.NumberFormat handles ALL amounts correctly with commas
+    // and never truncates or corrupts the number
+    return new Intl.NumberFormat("en-GH", {
+        style: "currency",
+        currency: "GHS",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(amount);
+    // Note: en-GH locale formats as "GH₵100,000.00" automatically
 }
 
 // Parse currency string back to number
-// parseCurrency("GH₵65.00") → 65
+// parseCurrency("GH₵100,000.00") → 100000
 export function parseCurrency(value: string): number {
     return parseFloat(value.replace(/[^0-9.]/g, "")) || 0;
 }
 
 // ── Dates ─────────────────────────────────────────────────────
 
-// Format ISO string to readable date
-// formatDate("2024-01-15T10:30:00Z") → "Jan 15, 2024"
 export function formatDate(isoString: string): string {
     return new Date(isoString).toLocaleDateString("en-GH", {
         year: "numeric",
@@ -32,8 +43,6 @@ export function formatDate(isoString: string): string {
     });
 }
 
-// Format ISO string to readable date + time
-// formatDateTime("2024-01-15T10:30:00Z") → "Jan 15, 2024, 10:30 AM"
 export function formatDateTime(isoString: string): string {
     return new Date(isoString).toLocaleString("en-GH", {
         year: "numeric",
@@ -44,8 +53,6 @@ export function formatDateTime(isoString: string): string {
     });
 }
 
-// How long ago was this timestamp?
-// timeAgo("2024-01-15T10:00:00Z") → "5 minutes ago"
 export function timeAgo(isoString: string): string {
     const seconds = Math.floor(
         (Date.now() - new Date(isoString).getTime()) / 1000
@@ -57,7 +64,6 @@ export function timeAgo(isoString: string): string {
     return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-// Days remaining until a date (negative = overdue)
 export function daysUntil(isoString: string): number {
     const ms = new Date(isoString).getTime() - Date.now();
     return Math.ceil(ms / (1000 * 60 * 60 * 24));
@@ -65,7 +71,6 @@ export function daysUntil(isoString: string): number {
 
 // ── Subscription helpers ──────────────────────────────────────
 
-// Human-readable subscription status label
 export function subscriptionStatusLabel(status: SubscriptionStatus): string {
     const labels: Record<SubscriptionStatus, string> = {
         trial: "Free Trial",
@@ -76,7 +81,6 @@ export function subscriptionStatusLabel(status: SubscriptionStatus): string {
     return labels[status];
 }
 
-// Tailwind color class for subscription status badge
 export function subscriptionStatusColor(status: SubscriptionStatus): string {
     const colors: Record<SubscriptionStatus, string> = {
         trial: "bg-blue-100 text-blue-800",
@@ -87,14 +91,12 @@ export function subscriptionStatusColor(status: SubscriptionStatus): string {
     return colors[status];
 }
 
-// Can this org access the system?
 export function isOrgAccessible(status: SubscriptionStatus): boolean {
     return ["trial", "active", "suspended"].includes(status);
 }
 
 // ── Order helpers ─────────────────────────────────────────────
 
-// Human-readable order status
 export function orderStatusLabel(status: OrderStatus): string {
     const labels: Record<OrderStatus, string> = {
         pending: "Pending",
@@ -105,7 +107,6 @@ export function orderStatusLabel(status: OrderStatus): string {
     return labels[status];
 }
 
-// Tailwind color for order status badge
 export function orderStatusColor(status: OrderStatus): string {
     const colors: Record<OrderStatus, string> = {
         pending: "bg-yellow-100 text-yellow-800",
@@ -116,7 +117,6 @@ export function orderStatusColor(status: OrderStatus): string {
     return colors[status];
 }
 
-// Can this order be cancelled?
 export function isOrderCancellable(status: OrderStatus): boolean {
     return status === "pending";
 }
@@ -125,8 +125,6 @@ export function isOrderCancellable(status: OrderStatus): boolean {
 
 const SESSION_KEY = "restaurant_customer_session";
 
-// Get or create a persistent customer session ID
-// Stored in localStorage — survives page refresh
 export function getOrCreateSessionId(): string {
     let sessionId = localStorage.getItem(SESSION_KEY);
 
@@ -138,39 +136,31 @@ export function getOrCreateSessionId(): string {
     return sessionId;
 }
 
-// Clear customer session (call after order is placed if needed)
 export function clearSession(): void {
     localStorage.removeItem(SESSION_KEY);
 }
 
 // ── Validation ────────────────────────────────────────────────
 
-// Validate UUID v4 format
 export function isValidUUID(value: string): boolean {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        value
-    );
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        .test(value);
 }
 
-// Validate QR identifier format (8 uppercase alphanumeric)
 export function isValidQrIdentifier(value: string): boolean {
     return /^[A-Z0-9]{8}$/.test(value);
 }
 
-// Validate email format
 export function isValidEmail(email: string): boolean {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
 // ── UUID generation ───────────────────────────────────────────
 
-// Generate a UUID v4 (for customer session IDs)
-// Uses crypto.randomUUID() when available (modern browsers)
 export function generateUUID(): string {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
         return crypto.randomUUID();
     }
-    // Fallback for older browsers
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0;
         const v = c === "x" ? r : (r & 0x3) | 0x8;
@@ -180,15 +170,11 @@ export function generateUUID(): string {
 
 // ── String utilities ──────────────────────────────────────────
 
-// Truncate long strings with ellipsis
-// truncate("Hello World", 8) → "Hello..."
 export function truncate(str: string, maxLength: number): string {
     if (str.length <= maxLength) return str;
     return str.slice(0, maxLength - 3) + "...";
 }
 
-// Capitalize first letter of each word
-// titleCase("jollof rice") → "Jollof Rice"
 export function titleCase(str: string): string {
     return str
         .toLowerCase()
@@ -197,10 +183,6 @@ export function titleCase(str: string): string {
         .join(" ");
 }
 
-// Sanitize user input — strips HTML tags to prevent XSS
-// For richer sanitization install DOMPurify:
-// npm install dompurify @types/dompurify
-// then: import DOMPurify from 'dompurify'; return DOMPurify.sanitize(input)
 export function sanitizeInput(input: string): string {
     return input
         .replace(/</g, "&lt;")
@@ -212,18 +194,17 @@ export function sanitizeInput(input: string): string {
 
 // ── Pricing ───────────────────────────────────────────────────
 
-// Calculate subscription amount
+// ✅ Updated to new tier-based pricing
+// Mirrors BILLING_TIERS in types.ts exactly
 export function calculateSubscriptionAmount(
-    planType: "monthly" | "yearly",
     branchCount: number
 ): number {
-    const PRICE_PER_BRANCH = 200; // GH₵200 per branch per month
-    const months = planType === "yearly" ? 12 : 1;
-    return PRICE_PER_BRANCH * branchCount * months;
+    if (branchCount >= 6) return 2000 * branchCount; // Enterprise
+    if (branchCount >= 2) return 1200 * branchCount; // Growth
+    return 500 * branchCount;                         // Starter
 }
 
 // Resolve final product price (mirrors DB logic)
-// override_price takes priority over base_price
 export function resolvePrice(
     basePrice: number,
     overridePrice: number | null
@@ -235,8 +216,6 @@ export function resolvePrice(
 
 // ── Array utilities ───────────────────────────────────────────
 
-// Group an array by a key
-// groupBy(products, "category_id") → { "uuid1": [...], "uuid2": [...] }
 export function groupBy<T>(
     array: T[],
     key: keyof T
@@ -250,8 +229,11 @@ export function groupBy<T>(
     }, {} as Record<string, T[]>);
 }
 
-// Move item in array (for drag-and-drop reordering)
-export function moveItem<T>(array: T[], fromIndex: number, toIndex: number): T[] {
+export function moveItem<T>(
+    array: T[],
+    fromIndex: number,
+    toIndex: number
+): T[] {
     const result = [...array];
     const [moved] = result.splice(fromIndex, 1);
     result.splice(toIndex, 0, moved);
@@ -261,16 +243,16 @@ export function moveItem<T>(array: T[], fromIndex: number, toIndex: number): T[]
 // ── QR code URL builder ───────────────────────────────────────
 
 export function buildQrUrl(qrIdentifier: string): string {
-    const baseUrl = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
+    const baseUrl =
+        import.meta.env.VITE_FRONTEND_URL || window.location.origin;
     return `${baseUrl}/menu/${qrIdentifier}`;
 }
 
 // ── Brute force / login attempt tracking ─────────────────────
-// Client-side tracking — complements Supabase's built-in rate limiting
 
 const LOGIN_ATTEMPTS_KEY = "login_attempts";
 const MAX_ATTEMPTS = 5;
-const LOCKOUT_DURATION = 15 * 60 * 1000; // 15 minutes in ms
+const LOCKOUT_DURATION = 15 * 60 * 1000;
 
 interface LoginAttempts {
     count: number;
@@ -284,12 +266,10 @@ export function recordLoginAttempt(): boolean {
         ? JSON.parse(raw)
         : { count: 0, firstAttempt: Date.now() };
 
-    // Check if locked
     if (attempts.lockedUntil && Date.now() < attempts.lockedUntil) {
-        return false; // Still locked
+        return false;
     }
 
-    // Reset if window has passed
     if (Date.now() - attempts.firstAttempt > LOCKOUT_DURATION) {
         localStorage.setItem(
             LOGIN_ATTEMPTS_KEY,

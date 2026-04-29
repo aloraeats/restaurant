@@ -211,7 +211,7 @@ function CartView({
                         rows={2}
                         placeholder="Any special instructions for the whole order..."
                         value={notes}
-                        onChange={(e) => setNotes(sanitizeInput(e.target.value))}
+                        onChange={(e) => setNotes(e.target.value)}
                         maxLength={300}
                         className="w-full border border-gray-200 rounded-xl px-3 py-2
                        text-sm resize-none focus:outline-none
@@ -392,7 +392,9 @@ export default function Customer() {
             items: cart.items.map((item) => ({
                 product_id: item.product_id,
                 quantity: item.quantity,
-                notes: item.notes || undefined,
+                notes: item.notes || undefined
+                    ? sanitizeInput(item.notes || "")
+                    : undefined,
             })),
             notes: notes || undefined,
         };

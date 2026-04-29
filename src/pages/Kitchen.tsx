@@ -84,11 +84,11 @@ function OrderCard({
                 {order.order_items.map((item) => (
                     <div key={item.id} className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                            <span className="text-sm text-gray-900 font-medium">
+                            <span className="text-sm text-gray-900 font-medium break-words whitespace-normal">
                                 ×{item.quantity} {item.products?.name}
                             </span>
                             {item.notes && (
-                                <p className="text-xs text-amber-600 mt-0.5">
+                                <p className="text-xs text-amber-600 mt-0.5 break-words whitespace-normal">
                                     📝 {item.notes}
                                 </p>
                             )}
@@ -103,7 +103,7 @@ function OrderCard({
             {/* Order notes */}
             {order.notes && (
                 <div className="bg-amber-50 rounded-xl px-3 py-2">
-                    <p className="text-xs text-amber-700">
+                    <p className="text-xs text-amber-700 break-words whitespace-normal">
                         <span className="font-medium">Order note:</span> {order.notes}
                     </p>
                 </div>
