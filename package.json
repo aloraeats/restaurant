@@ -2,6 +2,7 @@
   "name": "restaurant-mvp",
   "private": true,
   "version": "0.1.0",
+  "homepage": "https://www.aloralawgh.xyz",
   "type": "module",
   "scripts": {
     "dev": "vite",
