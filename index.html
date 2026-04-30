@@ -3,37 +3,42 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Restaurant Manager</title>
+    <title>Alora Eat</title>
 
-    <!--
-      Content Security Policy
-      TODO: Replace with your actual Supabase project ID
-      TODO: Add your GitHub Pages domain to connect-src
-    -->
+    <!-- Content Security Policy -->
     <meta http-equiv="Content-Security-Policy"
-          content="
-        default-src 'self';
-        script-src 'self' 'unsafe-inline';
-        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-        font-src 'self' https://fonts.gstatic.com;
-        img-src 'self' data: blob: https://*.supabase.co;
-        connect-src 'self'
-          https://*.supabase.co
-          wss://*.supabase.co
-          https://api.paystack.co
-          https://checkout.paystack.com;
-        frame-src https://checkout.paystack.com;
-      " />
+        content="
+            default-src 'self';
+            script-src 'self' 'unsafe-inline'
+                https://static.cloudflareinsights.com;
+            script-src-elem 'self' 'unsafe-inline'
+                https://static.cloudflareinsights.com;
+            style-src 'self' 'unsafe-inline'
+                https://fonts.googleapis.com;
+            font-src 'self'
+                https://fonts.gstatic.com;
+            img-src 'self' data: blob:
+                https://*.supabase.co;
+            connect-src 'self'
+                https://*.supabase.co
+                wss://*.supabase.co
+                https://api.paystack.co
+                https://checkout.paystack.com
+                https://cloudflareinsights.com;
+            frame-src
+                https://checkout.paystack.com;
+        "
+    />
 
-    <!-- GitHub Pages SPA redirect handler -->
+    <!-- GitHub Pages SPA routing handler -->
+    <!-- Works with public/404.html to handle page refreshes -->
     <script>
-        // Pick up the redirect path stored by 404.html
-        var redirect = sessionStorage.getItem('redirect');
-        if (redirect && redirect !== '/') {
-            sessionStorage.removeItem('redirect');
-            // Replace current history entry with the intended path
-            window.history.replaceState(null, null, redirect);
-        }
+        (function () {
+            var p = new URLSearchParams(window.location.search).get('p');
+            if (p) {
+                window.history.replaceState(null, null, p);
+            }
+        })();
     </script>
 
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
@@ -41,6 +46,12 @@
 <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "17f13b2eaa124d798d53cf45f985266f"}'></script><!-- End Cloudflare Web Analytics -->
+
+    <!-- Cloudflare Web Analytics -->
+    <script
+        defer
+        src="https://static.cloudflareinsights.com/beacon.min.js"
+        data-cf-beacon='{"token": "17f13b2eaa124d798dcf45f985266f"}'
+    ></script>
 </body>
 </html>
