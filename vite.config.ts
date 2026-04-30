@@ -7,8 +7,8 @@ export default defineConfig(({ mode }) => ({
     // In development: base is "/"
     // In production (GitHub Pages): base is "/restaurant/"
     // TODO: Change "/restaurant/" to your actual repo name
-    base: mode === "production" ? "/restaurant/" : "/",
-
+   // base: mode === "production" ? "/restaurant/" : "/",
+    base: mode === "production" ? "/" : "/",
     server: {
         port: 5173,
         host: true,
