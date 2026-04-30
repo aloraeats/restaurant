@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => ({
     // TODO: Change "/restaurant/" to your actual repo name
    // base: mode === "production" ? "/restaurant/" : "/",
     base: mode === "production" ? "/" : "/",
+    base: "/",
     server: {
         port: 5173,
         host: true,
