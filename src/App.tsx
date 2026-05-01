@@ -13,7 +13,8 @@ import PaymentCallback from "./pages/PaymentCallback";
 
 // Automatically uses "/" locally and "/restaurant/" on GitHub Pages
 // TODO: Change "restaurant" to your actual repo name
-const basename = import.meta.env.PROD ? "/restaurant/" : "/";
+//const basename = import.meta.env.PROD ? "/restaurant/" : "/";
+const basename = "/";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const { user, loading } = useAuth();
