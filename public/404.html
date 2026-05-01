@@ -1,17 +1,40 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <title>Alora Eat</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Restaurant Manager</title>
     <script>
-        // Saves the intended path then redirects to index.html
-        // index.html picks it up and restores it via history.replaceState
-        var path = window.location.pathname +
-                   window.location.search +
-                   window.location.hash;
-        var query = '?p=' + encodeURIComponent(path);
-        window.location.replace('/' + query);
+      // This script is part of the GitHub Pages SPA redirect trick
+      // When GitHub Pages hits a 404, it serves this file
+      // We grab the path and redirect to index.html with it encoded
+      var path = window.location.pathname;
+      var search = window.location.search;
+      var hash = window.location.hash;
+
+      // Store the full path in sessionStorage
+      sessionStorage.setItem(
+        'redirect',
+        path + search + hash
+      );
+
+      // Redirect to root
+      window.location.replace('/');
     </script>
 </head>
-<body></body>
+<body>
+    <div style="
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #f9fafb;
+    ">
+        <div style="text-align: center;">
+            <div style="font-size: 48px; margin-bottom: 16px;">🍽️</div>
+            <p style="color: #6b7280; font-size: 14px;">Redirecting...</p>
+        </div>
+    </div>
+</body>
 </html>
