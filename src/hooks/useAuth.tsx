@@ -1,10 +1,8 @@
 // ============================================================
-// useAuth.tsx
-// Fixed: NavigatorLockAcquireTimeoutError by disabling Web Locks
-// in supabase.ts + deduplicating SIGNED_IN events here.
+// useAuth.tsx - FIXED
 // ============================================================
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
     recordLoginAttempt,
@@ -39,8 +37,11 @@ export function useAuth(): UseAuthReturn {
         loading: true,
     });
 
+    // Use a ref to track the current userId being loaded
+    // prevents duplicate loads and race conditions
+    const loadingUserIdRef = useRef<string | null>(null);
+
     // ── Load org for a profile ────────────────────────────────
-    // Defined outside useCallback so it's stable
     const loadOrgForProfile = useCallback(async (profile: Profile) => {
         if (!profile.org_id) {
             setState({ user: profile, org: null, loading: false });
@@ -54,7 +55,6 @@ export function useAuth(): UseAuthReturn {
             .single();
 
         if (orgError) {
-            // RLS may block staff from reading org — not a crash
             console.warn("Org load warning (may be RLS):", orgError.message);
             setState({ user: profile, org: null, loading: false });
             return;
@@ -69,6 +69,10 @@ export function useAuth(): UseAuthReturn {
 
     // ── Load profile + org for a user id ──────────────────────
     const loadUserData = useCallback(async (userId: string) => {
+        // ✅ Skip if we're already loading this exact user
+        if (loadingUserIdRef.current === userId) return;
+        loadingUserIdRef.current = userId;
+
         try {
             const { data: profile, error: profileError } = await supabase
                 .from("profiles")
@@ -91,81 +95,91 @@ export function useAuth(): UseAuthReturn {
                     if (retryErr || !retry) {
                         console.error("Profile load failed:", retryErr?.message);
                         setState({ user: null, org: null, loading: false });
+                        loadingUserIdRef.current = null;
                         return;
                     }
 
                     await loadOrgForProfile(retry as Profile);
+                    loadingUserIdRef.current = null;
                     return;
                 }
 
                 console.error("Profile error:", profileError?.message);
                 setState({ user: null, org: null, loading: false });
+                loadingUserIdRef.current = null;
                 return;
             }
 
             await loadOrgForProfile(profile as Profile);
-
         } catch (err) {
             console.error("loadUserData error:", err);
             setState({ user: null, org: null, loading: false });
+        } finally {
+            loadingUserIdRef.current = null;
         }
     }, [loadOrgForProfile]);
 
     // ── Auth state listener ───────────────────────────────────
     useEffect(() => {
         let mounted = true;
-        let initialDone = false;
 
-        // Get existing session on mount
-        supabase.auth.getSession()
-            .then(({ data, error }) => {
+        // ✅ STEP 1: Set up the listener FIRST before getSession
+        // This prevents missing events that fire during getSession
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            (event, session) => {
                 if (!mounted) return;
+                console.log("Auth event:", event);
 
-                if (error) {
-                    console.error("getSession error:", error.message);
+                if (event === "SIGNED_OUT") {
+                    loadingUserIdRef.current = null;
                     setState({ user: null, org: null, loading: false });
                     return;
                 }
 
-                if (data?.session?.user) {
-                    initialDone = true;
-                    loadUserData(data.session.user.id);
-                } else {
-                    setState({ user: null, org: null, loading: false });
+                if (
+                    (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") &&
+                    session?.user
+                ) {
+                    // loadUserData is deduplicated by ref — safe to call
+                    loadUserData(session.user.id);
+                    return;
                 }
-            })
-            .catch((err) => {
-                if (!mounted) return;
-                console.error("getSession threw:", err);
-                setState({ user: null, org: null, loading: false });
-            });
 
-        // Listen for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
-                if (!mounted) return;
-                console.log("Auth event:", event);
-
-                if (event === "SIGNED_IN" && session?.user) {
-                    // ✅ Deduplicate: skip if getSession already loaded
-                    if (initialDone) {
-                        initialDone = false;
-                        return;
+                // INITIAL_SESSION fires once on mount with current session
+                if (event === "INITIAL_SESSION") {
+                    if (session?.user) {
+                        loadUserData(session.user.id);
+                    } else {
+                        // No session — stop loading immediately
+                        setState({ user: null, org: null, loading: false });
                     }
-                    await loadUserData(session.user.id);
-
-                } else if (event === "SIGNED_OUT") {
-                    setState({ user: null, org: null, loading: false });
-
-                } else if (event === "TOKEN_REFRESHED" && session?.user) {
-                    // Only reload if user state was somehow lost
-                    setState((prev) => {
-                        if (!prev.user) loadUserData(session.user.id);
-                        return prev;
-                    });
                 }
             }
         );
+
+        // ✅ STEP 2: getSession as a fallback for older Supabase versions
+        // that don't fire INITIAL_SESSION
+        supabase.auth.getSession().then(({ data, error }) => {
+            if (!mounted) return;
+
+            if (error) {
+                console.error("getSession error:", error.message);
+                setState({ user: null, org: null, loading: false });
+                return;
+            }
+
+            if (data?.session?.user) {
+                // loadUserData deduplication handles if INITIAL_SESSION
+                // already triggered this
+                loadUserData(data.session.user.id);
+            } else {
+                setState({ user: null, org: null, loading: false });
+            }
+        }).catch((err) => {
+            if (!mounted) return;
+            console.error("getSession threw:", err);
+            setState({ user: null, org: null, loading: false });
+        });
 
         return () => {
             mounted = false;
@@ -179,7 +193,9 @@ export function useAuth(): UseAuthReturn {
             const lockStatus = isLoginLocked();
             if (lockStatus.locked) {
                 const minutes = Math.ceil(lockStatus.remainingMs / 60000);
-                return { error: `Too many failed attempts. Try again in ${minutes} minute(s).` };
+                return {
+                    error: `Too many failed attempts. Try again in ${minutes} minute(s).`,
+                };
             }
 
             setState((prev) => ({ ...prev, loading: true }));
@@ -212,7 +228,6 @@ export function useAuth(): UseAuthReturn {
 
                 // onAuthStateChange SIGNED_IN handles the rest
                 return { error: null };
-
             } catch (err) {
                 setState((prev) => ({ ...prev, loading: false }));
                 return { error: "Sign in failed. Please try again." };
@@ -247,14 +262,15 @@ export function useAuth(): UseAuthReturn {
                 if (error) {
                     setState((prev) => ({ ...prev, loading: false }));
                     if (error.message.includes("already registered")) {
-                        return { error: "An account with this email already exists" };
+                        return {
+                            error: "An account with this email already exists",
+                        };
                     }
                     return { error: error.message };
                 }
 
                 setState((prev) => ({ ...prev, loading: false }));
                 return { error: null };
-
             } catch (err) {
                 setState((prev) => ({ ...prev, loading: false }));
                 return { error: "Sign up failed. Please try again." };

@@ -160,7 +160,7 @@ export default function Auth() {
                     <p className="text-gray-500 mb-6">
                         We sent a confirmation link to{" "}
                         <strong>{signupForm.email}</strong>.
-                        Click it to activate your account and start your 14-day free trial!
+                        Click it to activate your account and start taking your orders!
                     </p>
                     <button
                         onClick={() => { setTab("login"); setSignupDone(false); }}
@@ -363,7 +363,7 @@ export default function Auth() {
                 </div>
 
                 <p className="text-center text-xs text-gray-400 mt-4">
-                    GH₵200 per branch/month after trial • Cancel anytime
+                    1% of served orders per 30 days • No flat fees 🇬🇭
                 </p>
             </div>
         </div>

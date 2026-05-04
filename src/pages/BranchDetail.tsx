@@ -1,10 +1,11 @@
 // ============================================================
 // BranchDetail.tsx
 // 4 tabs: Details | Staff | Menu (inventory) | Tables
+// QR print: uses canvas.toDataURL() — no external API, no load delay
 // ============================================================
 
-import { QRCodeSVG } from "qrcode.react";
-import { useState, useEffect } from "react";
+import { QRCodeCanvas, QRCodeSVG } from "qrcode.react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { supabase, callFunction } from "../lib/supabase";
@@ -78,9 +79,7 @@ export default function BranchDetail() {
     >([]);
     const [staffModal, setStaffModal] = useState(false);
     const [staffForm, setStaffForm] = useState({
-        email: "",
-        password: "",
-        full_name: "",
+        email: "", password: "", full_name: "",
         branch_role: "kitchen" as "kitchen" | "waiter" | "branch_manager",
     });
     const [staffErrors, setStaffErrors] = useState<Record<string, string>>({});
@@ -102,6 +101,12 @@ export default function BranchDetail() {
     const [regeneratingQr, setRegeneratingQr] = useState<string | null>(null);
     const [deleteTable, setDeleteTable] = useState<RestaurantTable | null>(null);
     const [deletingTable, setDeletingTable] = useState(false);
+
+    // ── Hidden QR canvas refs for printing ───────────────────
+    // One hidden <QRCodeCanvas> is rendered per table (off-screen).
+    // On print, we grab its canvas element and call toDataURL()
+    // to get a base64 PNG — no network request, no load delay.
+    const qrWrapperRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
     // ── Load all data ─────────────────────────────────────────
     useEffect(() => {
@@ -126,16 +131,10 @@ export default function BranchDetail() {
             .eq("id", id!)
             .is("deleted_at", null);
 
-        // super_admin/manager — filter by org
-        // staff — trust branch_id from URL (RLS handles security)
         if (org?.id) query.eq("org_id", org.id);
 
         const { data, error } = await query.single();
-
-        if (error || !data) {
-            navigate("/branches");
-            return;
-        }
+        if (error || !data) { navigate("/branches"); return; }
         setBranch(data as Branch);
     }
 
@@ -144,7 +143,6 @@ export default function BranchDetail() {
             .from("branch_staff")
             .select("*, profiles(*)")
             .eq("branch_id", id!);
-
         setStaffList((data as any) || []);
     }
 
@@ -154,7 +152,6 @@ export default function BranchDetail() {
             .select("*, products(*)")
             .eq("branch_id", id!)
             .order("products(name)");
-
         setInventory((data as any) || []);
     }
 
@@ -164,72 +161,140 @@ export default function BranchDetail() {
             .select("*")
             .eq("branch_id", id!)
             .order("table_name");
-
         setTables((data as RestaurantTable[]) || []);
     }
 
-    // ── Print QR code ─────────────────────────────────────────
-    function handlePrintQr(table: RestaurantTable) {
+    // ── Print QR ──────────────────────────────────────────────
+    // Strategy:
+    //   1. Each table card renders a hidden <QRCodeCanvas> (400×400px,
+    //      positioned off-screen via the hidden wrapper div).
+    //   2. On print click, we find that canvas, call .toDataURL("image/png")
+    //      to get a base64 string — this is instant, no network needed.
+    //   3. We open a print window and embed the PNG as a data: URL directly
+    //      in the <img src>. The image is already fully loaded before
+    //      window.print() is called — no broken image.
+    const handlePrintQr = useCallback((table: RestaurantTable) => {
         const menuUrl = buildQrUrl(table.qr_identifier);
-        const printWindow = window.open("", "_blank");
 
+        // Grab the hidden wrapper div for this table
+        const wrapper = qrWrapperRefs.current[table.id];
+        const canvas = wrapper?.querySelector("canvas") as HTMLCanvasElement | null;
+
+        if (!canvas) {
+            // Fallback: canvas not mounted yet (shouldn't happen after loadTables)
+            toast.error("QR not ready — please try again");
+            return;
+        }
+
+        // Convert canvas pixels → base64 PNG (synchronous, instant)
+        const pngDataUrl = canvas.toDataURL("image/png");
+
+        const printWindow = window.open("", "_blank");
         if (!printWindow) {
             toast.error("Please allow popups to print QR codes");
             return;
         }
 
+        // Embed PNG as data: URL — no network request in print window
         printWindow.document.write(`
             <!DOCTYPE html>
             <html>
             <head>
-                <title>QR Code - ${table.table_name}</title>
+                <title>QR Code — ${table.table_name}</title>
                 <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
                     body {
                         display: flex;
-                        flex-direction: column;
                         align-items: center;
                         justify-content: center;
                         min-height: 100vh;
-                        margin: 0;
-                        font-family: sans-serif;
-                        background: white;
+                        font-family: -apple-system, BlinkMacSystemFont,
+                                     'Segoe UI', sans-serif;
+                        background: #fff;
+                        padding: 24px;
                     }
-                    .container {
+                    .card {
                         text-align: center;
-                        padding: 40px;
-                        border: 3px solid #000;
-                        border-radius: 16px;
-                        max-width: 300px;
+                        padding: 36px 40px;
+                        border: 3px solid #111;
+                        border-radius: 20px;
+                        width: 300px;
                     }
-                    h2  { margin: 0 0 8px 0; font-size: 24px; color: #111; }
-                    p   { margin: 0 0 20px 0; color: #666; font-size: 14px; }
-                    img { width: 200px; height: 200px; }
-                    .footer {
-                        margin-top: 16px;
+                    .restaurant {
                         font-size: 12px;
-                        color: #999;
+                        color: #888;
+                        letter-spacing: 0.05em;
+                        text-transform: uppercase;
+                        margin-bottom: 4px;
+                    }
+                    .table-name {
+                        font-size: 26px;
+                        font-weight: 700;
+                        color: #111;
+                        margin-bottom: 20px;
+                    }
+                    /* data: URL image — already loaded, prints perfectly */
+                    .qr-img {
+                        width: 200px;
+                        height: 200px;
+                        display: block;
+                        margin: 0 auto;
+                        image-rendering: crisp-edges;
+                        image-rendering: pixelated;
+                    }
+                    .scan-hint {
+                        margin-top: 18px;
+                        font-size: 14px;
+                        color: #444;
+                        font-weight: 500;
+                    }
+                    .url {
+                        margin-top: 10px;
+                        font-size: 9px;
+                        color: #bbb;
                         word-break: break-all;
+                        font-family: monospace;
                     }
                     @media print {
-                        body { -webkit-print-color-adjust: exact; }
+                        body { padding: 0; }
+                        .card { border: 3px solid #111; }
+                        /* Force black ink for QR */
+                        .qr-img { -webkit-print-color-adjust: exact;
+                                  print-color-adjust: exact; }
                     }
                 </style>
             </head>
             <body>
-                <div class="container">
-                    <h2>${table.table_name}</h2>
-                    <p>Scan to order 📱</p>
-                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(menuUrl)}" />
-                    <div class="footer">${menuUrl}</div>
+                <div class="card">
+                    <p class="restaurant">${branch?.name ?? "Restaurant"}</p>
+                    <p class="table-name">${table.table_name}</p>
+
+                    <!--
+                        src is a base64 PNG generated from the canvas.
+                        It is embedded in this HTML string — the browser
+                        does NOT make a network request to load it.
+                        It is 100% ready when window.print() fires.
+                    -->
+                    <img
+                        class="qr-img"
+                        src="${pngDataUrl}"
+                        alt="QR Code for ${table.table_name}"
+                    />
+
+                    <p class="scan-hint">📱 Scan to order</p>
+                    <p class="url">${menuUrl}</p>
                 </div>
+
                 <script>
-                    window.onload = () => { window.print(); window.close(); }
+                    // No onload needed — image is already embedded.
+                    window.print();
+                    window.onafterprint = function () { window.close(); };
                 </script>
             </body>
             </html>
         `);
         printWindow.document.close();
-    }
+    }, [branch]);
 
     // ── Staff handlers ────────────────────────────────────────
     async function handleCreateStaff() {
@@ -238,15 +303,11 @@ export default function BranchDetail() {
         const password = staffForm.password;
         const branch_role = staffForm.branch_role;
 
-        // Validate
         const errs: Record<string, string> = {};
         if (!email) errs.email = "Email is required";
         if (!full_name) errs.full_name = "Full name is required";
         if (!password || password.length < 6) errs.password = "Min 6 characters";
-        if (Object.keys(errs).length) {
-            setStaffErrors(errs);
-            return;
-        }
+        if (Object.keys(errs).length) { setStaffErrors(errs); return; }
 
         setStaffErrors({});
         setCreatingStaff(true);
@@ -254,35 +315,18 @@ export default function BranchDetail() {
         try {
             const { data, error } = await callFunction<CreateStaffResponse>(
                 "create-staff",
-                {
-                    email,
-                    password,
-                    full_name,
-                    role: "staff",
-                    branch_role,
-                    branch_id: id,
-                }
+                { email, password, full_name, role: "staff", branch_role, branch_id: id }
             );
 
-            if (error) {
-                toast.error(error);
-                return;
-            }
-
-            if (!data) {
-                toast.error("Something went wrong — please try again");
-                return;
-            }
+            if (error) { toast.error(error); return; }
+            if (!data) { toast.error("Something went wrong — please try again"); return; }
 
             toast.success(`${full_name} added as ${branch_role.replace("_", " ")}! 🎉`);
             setStaffModal(false);
-            setStaffForm({
-                email: "", password: "", full_name: "", branch_role: "kitchen",
-            });
+            setStaffForm({ email: "", password: "", full_name: "", branch_role: "kitchen" });
             await loadStaff();
-
         } catch (err) {
-            console.error("handleCreateStaff error:", err);
+            console.error("handleCreateStaff:", err);
             toast.error("An unexpected error occurred");
         } finally {
             setCreatingStaff(false);
@@ -291,43 +335,27 @@ export default function BranchDetail() {
 
     async function handleRemoveStaff(branchStaffId: string) {
         setRemovingStaff(branchStaffId);
-
         const { error } = await supabase
-            .from("branch_staff")
-            .delete()
-            .eq("id", branchStaffId);
-
-        if (error) {
-            toast.error("Failed to remove staff member");
-        } else {
-            toast.success("Staff member removed");
-            loadStaff();
-        }
-
+            .from("branch_staff").delete().eq("id", branchStaffId);
+        if (error) toast.error("Failed to remove staff member");
+        else { toast.success("Staff member removed"); loadStaff(); }
         setRemovingStaff(null);
     }
 
     // ── Inventory handlers ────────────────────────────────────
     async function toggleAvailability(invId: string, current: boolean) {
         setSavingInv(invId);
-
         const { error } = await supabase
             .from("branch_inventory")
             .update({ is_available: !current })
             .eq("id", invId);
 
-        if (error) {
-            toast.error("Failed to update availability");
-        } else {
-            setInventory((prev) =>
-                prev.map((inv) =>
-                    inv.id === invId
-                        ? { ...inv, is_available: !current }
-                        : inv
-                )
-            );
-        }
-
+        if (error) toast.error("Failed to update availability");
+        else setInventory((prev) =>
+            prev.map((inv) =>
+                inv.id === invId ? { ...inv, is_available: !current } : inv
+            )
+        );
         setSavingInv(null);
     }
 
@@ -340,12 +368,8 @@ export default function BranchDetail() {
             .update({ override_price: price })
             .eq("id", invId);
 
-        if (error) {
-            toast.error("Failed to update price");
-        } else {
-            toast.success("Price updated");
-            loadInventory();
-        }
+        if (error) toast.error("Failed to update price");
+        else { toast.success("Price updated"); loadInventory(); }
     }
 
     // ── Table handlers ────────────────────────────────────────
@@ -357,38 +381,28 @@ export default function BranchDetail() {
         }
 
         setCreatingTable(true);
-
         const { error } = await supabase
             .from("restaurant_tables")
             .insert({ table_name, branch_id: id });
 
-        if (error) {
-            toast.error("Failed to create table");
-        } else {
+        if (error) toast.error("Failed to create table");
+        else {
             toast.success("Table created with QR code! 📱");
             setTableModal(false);
             setTableForm({ table_name: "" });
             loadTables();
         }
-
         setCreatingTable(false);
     }
 
     async function handleRegenerateQr(tableId: string) {
         setRegeneratingQr(tableId);
-
         const { data, error } = await callFunction<RegenerateQrResponse>(
-            "regenerate-qr",
-            { table_id: tableId }
+            "regenerate-qr", { table_id: tableId }
         );
 
-        if (error || !data) {
-            toast.error(error || "Failed to regenerate QR code");
-        } else {
-            toast.success("QR regenerated! Old QR is now invalid ✅");
-            loadTables();
-        }
-
+        if (error || !data) toast.error(error || "Failed to regenerate QR code");
+        else { toast.success("QR regenerated! Old QR is now invalid ✅"); loadTables(); }
         setRegeneratingQr(null);
     }
 
@@ -397,16 +411,13 @@ export default function BranchDetail() {
         setDeletingTable(true);
 
         const { error } = await supabase
-            .from("restaurant_tables")
-            .delete()
-            .eq("id", deleteTable.id);
+            .from("restaurant_tables").delete().eq("id", deleteTable.id);
 
         if (error) {
-            if (error.code === "23503") {
+            if (error.code === "23503")
                 toast.error("Cannot delete — table has order history");
-            } else {
+            else
                 toast.error("Failed to delete table");
-            }
         } else {
             toast.success("Table deleted");
             loadTables();
@@ -437,6 +448,36 @@ export default function BranchDetail() {
     return (
         <div className="page-container">
 
+            {/*
+                ── Hidden QR canvases (off-screen) ──────────────────────
+                Rendered for every table. Each one produces a real
+                <canvas> element with the QR pixels already drawn.
+                handlePrintQr() reads .toDataURL() from these.
+                They are invisible to the user (left: -9999px).
+            */}
+            <div
+                aria-hidden="true"
+                style={{
+                    position: "fixed", left: "-9999px", top: "-9999px",
+                    pointerEvents: "none", opacity: 0
+                }}
+            >
+                {tables.map((table) => (
+                    <div
+                        key={table.id}
+                        ref={(el) => { qrWrapperRefs.current[table.id] = el; }}
+                    >
+                        <QRCodeCanvas
+                            value={buildQrUrl(table.qr_identifier)}
+                            size={400}
+                            level="H"
+                            bgColor="#ffffff"
+                            fgColor="#000000"
+                        />
+                    </div>
+                ))}
+            </div>
+
             {/* ── Header ──────────────────────────────────── */}
             <div className="flex items-center gap-3 mb-6">
                 <button
@@ -458,7 +499,9 @@ export default function BranchDetail() {
 
             <div className="mt-6">
 
-                {/* ── DETAILS TAB ─────────────────────────── */}
+                {/* ════════════════════════════════════════════
+                    DETAILS TAB
+                ════════════════════════════════════════════ */}
                 {activeTab === "details" && (
                     <div className="max-w-lg space-y-6">
                         <div className="card space-y-4">
@@ -508,7 +551,9 @@ export default function BranchDetail() {
                     </div>
                 )}
 
-                {/* ── STAFF TAB ───────────────────────────── */}
+                {/* ════════════════════════════════════════════
+                    STAFF TAB
+                ════════════════════════════════════════════ */}
                 {activeTab === "staff" && (
                     <div className="max-w-2xl">
                         <div className="flex items-center justify-between mb-4">
@@ -549,7 +594,9 @@ export default function BranchDetail() {
                     </div>
                 )}
 
-                {/* ── MENU / INVENTORY TAB ────────────────── */}
+                {/* ════════════════════════════════════════════
+                    MENU / INVENTORY TAB
+                ════════════════════════════════════════════ */}
                 {activeTab === "menu" && (
                     <div>
                         <p className="text-sm text-gray-500 mb-4">
@@ -588,10 +635,8 @@ export default function BranchDetail() {
                                     </thead>
                                     <tbody className="divide-y divide-gray-50">
                                         {inventory.map((inv) => (
-                                            <tr
-                                                key={inv.id}
-                                                className="hover:bg-gray-50 transition-colors"
-                                            >
+                                            <tr key={inv.id}
+                                                className="hover:bg-gray-50 transition-colors">
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-3">
                                                         {inv.products?.image_url ? (
@@ -602,7 +647,8 @@ export default function BranchDetail() {
                                                             />
                                                         ) : (
                                                             <div className="w-8 h-8 bg-gray-100 rounded-lg
-                                                                            flex items-center justify-center text-sm">
+                                                                            flex items-center justify-center
+                                                                            text-sm">
                                                                 🍽️
                                                             </div>
                                                         )}
@@ -615,10 +661,7 @@ export default function BranchDetail() {
                                                     <Toggle
                                                         checked={inv.is_available}
                                                         onChange={() =>
-                                                            toggleAvailability(
-                                                                inv.id,
-                                                                inv.is_available
-                                                            )
+                                                            toggleAvailability(inv.id, inv.is_available)
                                                         }
                                                         disabled={savingInv === inv.id}
                                                     />
@@ -638,10 +681,7 @@ export default function BranchDetail() {
                                                                 : ""
                                                         }
                                                         onBlur={(e) =>
-                                                            updateOverridePrice(
-                                                                inv.id,
-                                                                e.target.value
-                                                            )
+                                                            updateOverridePrice(inv.id, e.target.value)
                                                         }
                                                         className="w-28 text-right border border-gray-200
                                                                    rounded-lg px-2 py-1 text-sm
@@ -658,7 +698,9 @@ export default function BranchDetail() {
                     </div>
                 )}
 
-                {/* ── TABLES TAB ──────────────────────────── */}
+                {/* ════════════════════════════════════════════
+                    TABLES TAB
+                ════════════════════════════════════════════ */}
                 {activeTab === "tables" && (
                     <div className="max-w-4xl">
                         <div className="flex items-center justify-between mb-4">
@@ -688,11 +730,11 @@ export default function BranchDetail() {
                                     return (
                                         <div key={table.id} className="card text-center">
 
-                                            {/* Scannable QR code */}
+                                            {/* Visible SVG QR — crisp on screen */}
                                             <div className="flex justify-center mb-3">
                                                 <div className="p-3 bg-white border-2
-                                                               border-gray-100 rounded-xl
-                                                               inline-block">
+                                                                border-gray-100 rounded-xl
+                                                                inline-block">
                                                     <QRCodeSVG
                                                         value={menuUrl}
                                                         size={160}
@@ -702,7 +744,6 @@ export default function BranchDetail() {
                                                 </div>
                                             </div>
 
-                                            {/* Table info */}
                                             <p className="font-semibold text-gray-900">
                                                 {table.table_name}
                                             </p>
@@ -765,10 +806,7 @@ export default function BranchDetail() {
                 size="sm"
                 footer={
                     <>
-                        <Button
-                            variant="secondary"
-                            onClick={() => setStaffModal(false)}
-                        >
+                        <Button variant="secondary" onClick={() => setStaffModal(false)}>
                             Cancel
                         </Button>
                         <Button onClick={handleCreateStaff} loading={creatingStaff}>
@@ -821,8 +859,7 @@ export default function BranchDetail() {
                             onChange={(e) =>
                                 setStaffForm((p) => ({
                                     ...p,
-                                    branch_role: e.target.value as
-                                        typeof staffForm.branch_role,
+                                    branch_role: e.target.value as typeof staffForm.branch_role,
                                 }))
                             }
                             className="w-full rounded-lg border border-gray-300 px-3 py-2
@@ -847,10 +884,7 @@ export default function BranchDetail() {
                 size="sm"
                 footer={
                     <>
-                        <Button
-                            variant="secondary"
-                            onClick={() => setTableModal(false)}
-                        >
+                        <Button variant="secondary" onClick={() => setTableModal(false)}>
                             Cancel
                         </Button>
                         <Button onClick={handleCreateTable} loading={creatingTable}>
