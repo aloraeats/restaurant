@@ -1,3 +1,4 @@
+// src/App.tsx
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
 import Layout from "./components/Layout";
@@ -11,11 +12,9 @@ import Kitchen from "./pages/Kitchen";
 import Customer from "./pages/Customer";
 import PaymentCallback from "./pages/PaymentCallback";
 
-// Automatically uses "/" locally and "/restaurant/" on GitHub Pages
-// TODO: Change "restaurant" to your actual repo name
-//const basename = import.meta.env.PROD ? "/restaurant/" : "/";
 const basename = "/";
 
+// ── Protected route — waits for auth to resolve ───────────────
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const { user, loading } = useAuth();
 
@@ -23,8 +22,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="flex flex-col items-center gap-3">
-                    <div className="w-10 h-10 border-4 border-green-500 border-t-transparent
-                          rounded-full animate-spin" />
+                    <div className="w-10 h-10 border-4 border-green-500
+                                    border-t-transparent rounded-full animate-spin" />
                     <p className="text-gray-500 text-sm">Loading...</p>
                 </div>
             </div>
@@ -35,14 +34,47 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
 }
 
+// ── Auth route — redirects to dashboard if logged in ──────────
+function AuthRoute() {
+    const { user, loading } = useAuth();
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="w-10 h-10 border-4 border-green-500
+                                border-t-transparent rounded-full animate-spin" />
+            </div>
+        );
+    }
+
+    // Only redirect if we are CERTAIN user is logged in
+    if (user) return <Navigate to="/dashboard" replace />;
+
+    // Not logged in — show the login page
+    return <Auth />;
+}
+
 export default function App() {
     return (
         <BrowserRouter basename={basename}>
             <Routes>
-                {/* ── Public routes ── */}
-                <Route path="/" element={<Auth />} />
+                {/*
+                    ── Truly public routes ──────────────────────────────
+                    These NEVER touch auth state for redirect decisions.
+                    Customer page is 100% anonymous — no useAuth involved
+                    in routing. The component itself can still call
+                    useAuth() if needed, but routing won't redirect it.
+                */}
                 <Route path="/menu/:qrId" element={<Customer />} />
                 <Route path="/payment-callback" element={<PaymentCallback />} />
+
+                {/*
+                    ── Auth route ───────────────────────────────────────
+                    Shows login page, redirects to /dashboard if logged in.
+                    Separated into its own component so the loading state
+                    is handled before any redirect decision is made.
+                */}
+                <Route path="/" element={<AuthRoute />} />
 
                 {/* ── Protected routes ── */}
                 <Route

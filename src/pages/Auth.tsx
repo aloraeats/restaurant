@@ -1,12 +1,11 @@
 // ============================================================
 // Auth.tsx
 // Login + Signup on one page with tabs
-// Signup creates a new org (restaurant owner)
-// Login for all roles (super_admin, manager, staff)
+// NO redirect logic here — AuthRoute in App.tsx handles it
+// NO loading check here — AuthRoute in App.tsx handles it
 // ============================================================
 
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { Button, Input } from "../components/UI";
 import { toast } from "../components/UI";
@@ -29,18 +28,18 @@ interface SignupForm {
 }
 
 export default function Auth() {
-    const { user, loading, signIn, signUp } = useAuth();
-    const navigate = useNavigate();
+    // ✅ Only signIn and signUp — no user, no loading, no navigate
+    // AuthRoute in App.tsx handles the redirect + loading spinner
+    const { signIn, signUp } = useAuth();
+
     const [tab, setTab] = useState<AuthTab>("login");
 
-    // Login form state
     const [loginForm, setLoginForm] = useState<LoginForm>({
         email: "",
         password: "",
         remember_me: false,
     });
 
-    // Signup form state
     const [signupForm, setSignupForm] = useState<SignupForm>({
         full_name: "",
         org_name: "",
@@ -53,13 +52,6 @@ export default function Auth() {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [signupDone, setSignupDone] = useState(false);
 
-    // Redirect if already logged in
-    useEffect(() => {
-        if (!loading && user) {
-            navigate("/dashboard", { replace: true });
-        }
-    }, [user, loading, navigate]);
-
     // ── Login ─────────────────────────────────────────────────
     async function handleLogin(e: React.FormEvent) {
         e.preventDefault();
@@ -68,7 +60,6 @@ export default function Auth() {
         const email = sanitizeInput(loginForm.email);
         const password = loginForm.password;
 
-        // Client-side validation
         if (!isValidEmail(email)) {
             setErrors({ email: "Enter a valid email address" });
             return;
@@ -96,7 +87,7 @@ export default function Auth() {
             return;
         }
 
-        // useAuth's onAuthStateChange handles redirect
+        // AuthRoute watches auth state and redirects to /dashboard
         toast.success("Welcome back! 🎉");
     }
 
@@ -111,7 +102,6 @@ export default function Auth() {
         const password = signupForm.password;
         const confirm = signupForm.confirm;
 
-        // Validate
         const newErrors: Record<string, string> = {};
         if (!full_name) newErrors.full_name = "Full name is required";
         if (!org_name) newErrors.org_name = "Restaurant name is required";
@@ -134,25 +124,16 @@ export default function Auth() {
             return;
         }
 
-        // Supabase sends confirmation email
         setSignupDone(true);
     }
 
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="w-8 h-8 border-4 border-green-500 border-t-transparent
-                        rounded-full animate-spin" />
-            </div>
-        );
-    }
-
-    // ── Email confirmation sent screen ─────────────────────────
+    // ── Email confirmation sent ────────────────────────────────
     if (signupDone) {
         return (
             <div className="min-h-screen flex items-center justify-center
-                      bg-gradient-to-br from-green-50 to-emerald-100 p-4">
-                <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
+                            bg-gradient-to-br from-green-50 to-emerald-100 p-4">
+                <div className="bg-white rounded-2xl shadow-lg p-8
+                                max-w-md w-full text-center">
                     <div className="text-6xl mb-4">📧</div>
                     <h2 className="text-2xl font-bold text-gray-900 mb-2">
                         Check your email!
@@ -160,7 +141,7 @@ export default function Auth() {
                     <p className="text-gray-500 mb-6">
                         We sent a confirmation link to{" "}
                         <strong>{signupForm.email}</strong>.
-                        Click it to activate your account and start taking your orders!
+                        Click it to activate your account and start taking orders!
                     </p>
                     <button
                         onClick={() => { setTab("login"); setSignupDone(false); }}
@@ -173,10 +154,12 @@ export default function Auth() {
         );
     }
 
+    // ── Login / Signup form ───────────────────────────────────
     return (
         <div className="min-h-screen flex items-center justify-center
-                    bg-gradient-to-br from-green-50 to-emerald-100 p-4">
+                        bg-gradient-to-br from-green-50 to-emerald-100 p-4">
             <div className="w-full max-w-md">
+
                 {/* Header */}
                 <div className="text-center mb-8">
                     <div className="text-5xl mb-3">🍽️</div>
@@ -190,6 +173,7 @@ export default function Auth() {
 
                 {/* Card */}
                 <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+
                     {/* Tabs */}
                     <div className="flex border-b border-gray-100">
                         {(["login", "signup"] as AuthTab[]).map((t) => (
@@ -197,12 +181,13 @@ export default function Auth() {
                                 key={t}
                                 onClick={() => { setTab(t); setErrors({}); }}
                                 className={`
-                  flex-1 py-4 text-sm font-semibold transition-colors capitalize
-                  ${tab === t
+                                    flex-1 py-4 text-sm font-semibold
+                                    transition-colors capitalize
+                                    ${tab === t
                                         ? "text-green-700 border-b-2 border-green-500 bg-green-50"
                                         : "text-gray-500 hover:text-gray-700"
                                     }
-                `}
+                                `}
                             >
                                 {t === "login" ? "Sign In" : "Create Account"}
                             </button>
@@ -210,9 +195,11 @@ export default function Auth() {
                     </div>
 
                     <div className="p-6">
+
                         {/* ── LOGIN FORM ── */}
                         {tab === "login" && (
-                            <form onSubmit={handleLogin} className="space-y-4" noValidate>
+                            <form onSubmit={handleLogin}
+                                className="space-y-4" noValidate>
                                 <Input
                                     label="Email"
                                     type="email"
@@ -239,8 +226,8 @@ export default function Auth() {
                                     autoComplete="current-password"
                                 />
 
-                                {/* Remember me */}
-                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <label className="flex items-center gap-2
+                                                  cursor-pointer select-none">
                                     <input
                                         type="checkbox"
                                         checked={loginForm.remember_me}
@@ -250,8 +237,8 @@ export default function Auth() {
                                                 remember_me: e.target.checked,
                                             }))
                                         }
-                                        className="w-4 h-4 rounded border-gray-300 text-green-600
-                               focus:ring-green-500"
+                                        className="w-4 h-4 rounded border-gray-300
+                                                   text-green-600 focus:ring-green-500"
                                     />
                                     <span className="text-sm text-gray-600">
                                         Remember me for 7 days
@@ -275,10 +262,12 @@ export default function Auth() {
 
                         {/* ── SIGNUP FORM ── */}
                         {tab === "signup" && (
-                            <form onSubmit={handleSignup} className="space-y-4" noValidate>
+                            <form onSubmit={handleSignup}
+                                className="space-y-4" noValidate>
+
                                 <div className="bg-blue-50 rounded-lg p-3">
                                     <p className="text-xs text-blue-700 font-medium">
-                                        🎉 Start your 14-day free trial — no credit card required!
+                                        🎉 Free to start — only pay 1% of what you earn!
                                     </p>
                                 </div>
 
@@ -288,7 +277,9 @@ export default function Auth() {
                                     placeholder="Akosua Mensah"
                                     value={signupForm.full_name}
                                     onChange={(e) =>
-                                        setSignupForm((p) => ({ ...p, full_name: e.target.value }))
+                                        setSignupForm((p) => ({
+                                            ...p, full_name: e.target.value,
+                                        }))
                                     }
                                     error={errors.full_name}
                                     required
@@ -301,7 +292,9 @@ export default function Auth() {
                                     placeholder="Akosua Kitchen Ghana"
                                     value={signupForm.org_name}
                                     onChange={(e) =>
-                                        setSignupForm((p) => ({ ...p, org_name: e.target.value }))
+                                        setSignupForm((p) => ({
+                                            ...p, org_name: e.target.value,
+                                        }))
                                     }
                                     error={errors.org_name}
                                     required
@@ -313,7 +306,9 @@ export default function Auth() {
                                     placeholder="you@restaurant.com"
                                     value={signupForm.email}
                                     onChange={(e) =>
-                                        setSignupForm((p) => ({ ...p, email: e.target.value }))
+                                        setSignupForm((p) => ({
+                                            ...p, email: e.target.value,
+                                        }))
                                     }
                                     error={errors.email}
                                     required
@@ -325,7 +320,9 @@ export default function Auth() {
                                     placeholder="Min. 8 characters"
                                     value={signupForm.password}
                                     onChange={(e) =>
-                                        setSignupForm((p) => ({ ...p, password: e.target.value }))
+                                        setSignupForm((p) => ({
+                                            ...p, password: e.target.value,
+                                        }))
                                     }
                                     error={errors.password}
                                     required
@@ -337,7 +334,9 @@ export default function Auth() {
                                     placeholder="Repeat password"
                                     value={signupForm.confirm}
                                     onChange={(e) =>
-                                        setSignupForm((p) => ({ ...p, confirm: e.target.value }))
+                                        setSignupForm((p) => ({
+                                            ...p, confirm: e.target.value,
+                                        }))
                                     }
                                     error={errors.confirm}
                                     required
@@ -350,12 +349,11 @@ export default function Auth() {
                                     size="lg"
                                     loading={submitting}
                                 >
-                                    Create Account & Start Trial
+                                    Create Account
                                 </Button>
 
                                 <p className="text-xs text-center text-gray-400">
                                     By signing up you agree to our Terms of Service.
-                                    {/* TODO: Add actual ToS link */}
                                 </p>
                             </form>
                         )}

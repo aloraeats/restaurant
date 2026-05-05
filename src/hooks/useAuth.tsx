@@ -1,8 +1,13 @@
 // ============================================================
-// useAuth.tsx - FIXED
+// src/hooks/useAuth.tsx
+// Auth as Context — single instance, no duplicate listeners
 // ============================================================
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+    createContext, useContext, useState,
+    useEffect, useCallback, useRef,
+    type ReactNode,
+} from "react";
 import { supabase } from "../lib/supabase";
 import {
     recordLoginAttempt,
@@ -24,21 +29,24 @@ interface SignUpOptions {
     org_name: string;
 }
 
-interface UseAuthReturn extends AuthState {
+interface AuthContextValue extends AuthState {
     signIn: (opts: SignInOptions) => Promise<{ error: string | null }>;
     signUp: (opts: SignUpOptions) => Promise<{ error: string | null }>;
     signOut: () => Promise<void>;
 }
 
-export function useAuth(): UseAuthReturn {
+// ── Context ───────────────────────────────────────────────────
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+// ── Provider ──────────────────────────────────────────────────
+export function AuthProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<AuthState>({
         user: null,
         org: null,
         loading: true,
     });
 
-    // Use a ref to track the current userId being loaded
-    // prevents duplicate loads and race conditions
+    // Ref to prevent duplicate concurrent loads for the same userId
     const loadingUserIdRef = useRef<string | null>(null);
 
     // ── Load org for a profile ────────────────────────────────
@@ -55,7 +63,7 @@ export function useAuth(): UseAuthReturn {
             .single();
 
         if (orgError) {
-            console.warn("Org load warning (may be RLS):", orgError.message);
+            console.warn("Org load warning:", orgError.message);
             setState({ user: profile, org: null, loading: false });
             return;
         }
@@ -67,10 +75,13 @@ export function useAuth(): UseAuthReturn {
         });
     }, []);
 
-    // ── Load profile + org for a user id ──────────────────────
+    // ── Load profile + org ────────────────────────────────────
     const loadUserData = useCallback(async (userId: string) => {
-        // ✅ Skip if we're already loading this exact user
-        if (loadingUserIdRef.current === userId) return;
+        // Already loading this user — skip
+        if (loadingUserIdRef.current === userId) {
+            console.log("loadUserData: skipping duplicate for", userId);
+            return;
+        }
         loadingUserIdRef.current = userId;
 
         try {
@@ -81,7 +92,6 @@ export function useAuth(): UseAuthReturn {
                 .single();
 
             if (profileError || !profile) {
-                // PGRST116 = no rows — profile trigger may not have fired yet
                 if (profileError?.code === "PGRST116") {
                     console.warn("Profile not ready, retrying in 1s...");
                     await new Promise((r) => setTimeout(r, 1000));
@@ -95,18 +105,13 @@ export function useAuth(): UseAuthReturn {
                     if (retryErr || !retry) {
                         console.error("Profile load failed:", retryErr?.message);
                         setState({ user: null, org: null, loading: false });
-                        loadingUserIdRef.current = null;
                         return;
                     }
-
                     await loadOrgForProfile(retry as Profile);
-                    loadingUserIdRef.current = null;
                     return;
                 }
-
                 console.error("Profile error:", profileError?.message);
                 setState({ user: null, org: null, loading: false });
-                loadingUserIdRef.current = null;
                 return;
             }
 
@@ -119,12 +124,10 @@ export function useAuth(): UseAuthReturn {
         }
     }, [loadOrgForProfile]);
 
-    // ── Auth state listener ───────────────────────────────────
+    // ── Single auth listener — runs once for the whole app ────
     useEffect(() => {
         let mounted = true;
 
-        // ✅ STEP 1: Set up the listener FIRST before getSession
-        // This prevents missing events that fire during getSession
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (event, session) => {
                 if (!mounted) return;
@@ -136,50 +139,37 @@ export function useAuth(): UseAuthReturn {
                     return;
                 }
 
-                if (
-                    (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") &&
-                    session?.user
-                ) {
-                    // loadUserData is deduplicated by ref — safe to call
-                    loadUserData(session.user.id);
-                    return;
-                }
-
-                // INITIAL_SESSION fires once on mount with current session
                 if (event === "INITIAL_SESSION") {
                     if (session?.user) {
                         loadUserData(session.user.id);
                     } else {
-                        // No session — stop loading immediately
                         setState({ user: null, org: null, loading: false });
                     }
+                    return;
+                }
+
+                if (event === "SIGNED_IN" && session?.user) {
+                    // Only load if not already loaded for this user
+                    setState((prev) => {
+                        if (prev.user?.id === session.user.id && !prev.loading) {
+                            console.log("Auth event: SIGNED_IN skipped — already loaded");
+                            return prev;
+                        }
+                        loadUserData(session.user.id);
+                        return prev;
+                    });
+                    return;
+                }
+
+                if (event === "TOKEN_REFRESHED" && session?.user) {
+                    // Only reload if user data is missing
+                    setState((prev) => {
+                        if (!prev.user) loadUserData(session.user.id);
+                        return prev;
+                    });
                 }
             }
         );
-
-        // ✅ STEP 2: getSession as a fallback for older Supabase versions
-        // that don't fire INITIAL_SESSION
-        supabase.auth.getSession().then(({ data, error }) => {
-            if (!mounted) return;
-
-            if (error) {
-                console.error("getSession error:", error.message);
-                setState({ user: null, org: null, loading: false });
-                return;
-            }
-
-            if (data?.session?.user) {
-                // loadUserData deduplication handles if INITIAL_SESSION
-                // already triggered this
-                loadUserData(data.session.user.id);
-            } else {
-                setState({ user: null, org: null, loading: false });
-            }
-        }).catch((err) => {
-            if (!mounted) return;
-            console.error("getSession threw:", err);
-            setState({ user: null, org: null, loading: false });
-        });
 
         return () => {
             mounted = false;
@@ -226,9 +216,8 @@ export function useAuth(): UseAuthReturn {
                     localStorage.removeItem("remember_me");
                 }
 
-                // onAuthStateChange SIGNED_IN handles the rest
                 return { error: null };
-            } catch (err) {
+            } catch {
                 setState((prev) => ({ ...prev, loading: false }));
                 return { error: "Sign in failed. Please try again." };
             }
@@ -262,16 +251,14 @@ export function useAuth(): UseAuthReturn {
                 if (error) {
                     setState((prev) => ({ ...prev, loading: false }));
                     if (error.message.includes("already registered")) {
-                        return {
-                            error: "An account with this email already exists",
-                        };
+                        return { error: "An account with this email already exists" };
                     }
                     return { error: error.message };
                 }
 
                 setState((prev) => ({ ...prev, loading: false }));
                 return { error: null };
-            } catch (err) {
+            } catch {
                 setState((prev) => ({ ...prev, loading: false }));
                 return { error: "Sign up failed. Please try again." };
             }
@@ -291,5 +278,18 @@ export function useAuth(): UseAuthReturn {
         }
     }, []);
 
-    return { ...state, signIn, signUp, signOut };
+    return (
+        <AuthContext.Provider
+            value={{ ...state, signIn, signUp, signOut }}
+        >
+            {children}
+        </AuthContext.Provider>
+    );
+}
+
+// ── Hook ──────────────────────────────────────────────────────
+export function useAuth(): AuthContextValue {
+    const ctx = useContext(AuthContext);
+    if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
+    return ctx;
 }
