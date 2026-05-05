@@ -1,39 +1,36 @@
+<!-- public/404.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Restaurant Manager</title>
+    <title>Alora Eat</title>
     <script>
-      // This script is part of the GitHub Pages SPA redirect trick
-      // When GitHub Pages hits a 404, it serves this file
-      // We grab the path and redirect to index.html with it encoded
-      var path = window.location.pathname;
-      var search = window.location.search;
-      var hash = window.location.hash;
-
-      // Store the full path in sessionStorage
-      sessionStorage.setItem(
-        'redirect',
-        path + search + hash
-      );
-
-      // Redirect to root
-      window.location.replace('/');
+        // GitHub Pages SPA routing fix
+        // GitHub Pages returns 404 for any path that isn't a real file
+        // We save the intended path to sessionStorage then redirect to /
+        // index.html reads it back and restores the route before React loads
+        sessionStorage.setItem(
+            'spa_redirect',
+            window.location.pathname +
+            window.location.search +
+            window.location.hash
+        );
+        window.location.replace('/');
     </script>
 </head>
 <body>
     <div style="
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      font-family: system-ui, sans-serif;
-      background: #f9fafb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: #f9fafb;
     ">
         <div style="text-align: center;">
             <div style="font-size: 48px; margin-bottom: 16px;">🍽️</div>
-            <p style="color: #6b7280; font-size: 14px;">Redirecting...</p>
+            <p style="color: #6b7280; font-size: 14px;">Loading...</p>
         </div>
     </div>
 </body>

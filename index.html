@@ -1,3 +1,4 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,45 +6,85 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Alora Eat</title>
 
-    <!-- Content Security Policy -->
+    <!--
+        SPA routing restore — runs BEFORE React loads.
+        Reads the path saved by 404.html and rewrites
+        the browser history so React Router sees the
+        correct URL instead of just "/".
+        Must be the FIRST script in <head>.
+    -->
+    <script>
+        (function () {
+            var redirect = sessionStorage.getItem('spa_redirect');
+            if (redirect && redirect !== '/') {
+                sessionStorage.removeItem('spa_redirect');
+                window.history.replaceState(null, null, redirect);
+            }
+        })();
+    </script>
+
+    <!--
+        Content Security Policy
+
+        SECURITY NOTES:
+        - 'unsafe-inline' on script-src is needed for the inline
+          script above. Without it the SPA redirect breaks.
+        - 'unsafe-eval' is required by React's dev tools and some
+          bundler output. Consider removing in prod if possible.
+        - Cloudflare RUM (cloudflareinsights.com) needs connect-src
+          and script-src entries or it throws CSP errors in console.
+        - img-src includes *.supabase.co for product images from
+          Supabase Storage. data: and blob: needed for QR canvas.
+        - wss://*.supabase.co is required for Supabase Realtime
+          (kitchen board live updates).
+        - frame-src checkout.paystack.com for Paystack iframe.
+    -->
     <meta http-equiv="Content-Security-Policy"
           content="
             default-src 'self';
-            script-src 'self' 'unsafe-inline' 'unsafe-eval'
+
+            script-src
+                'self'
+                'unsafe-inline'
+                'unsafe-eval'
                 https://static.cloudflareinsights.com;
-            style-src 'self' 'unsafe-inline'
+
+            style-src
+                'self'
+                'unsafe-inline'
                 https://fonts.googleapis.com;
-            font-src 'self'
+
+            font-src
+                'self'
                 https://fonts.gstatic.com;
-            img-src 'self' data: blob:
+
+            img-src
+                'self'
+                data:
+                blob:
                 https://*.supabase.co;
-            connect-src 'self'
+
+            connect-src
+                'self'
                 https://*.supabase.co
                 wss://*.supabase.co
                 https://api.paystack.co
                 https://checkout.paystack.com
                 https://cloudflareinsights.com
                 https://*.cloudflareinsights.com;
+
             frame-src
                 https://checkout.paystack.com;
-            worker-src 'self' blob:;
-        " />
 
-    <!-- GitHub Pages SPA routing handler -->
-    <script>
-        (function () {
-            var p = new URLSearchParams(window.location.search).get('p');
-            if (p) {
-                window.history.replaceState(null, null, p);
-            }
-        })();
-    </script>
+            worker-src
+                'self'
+                blob:;
+        " />
 
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
 </head>
 <body>
     <div id="root"></div>
-    <!-- THIS WAS MISSING -->
     <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
