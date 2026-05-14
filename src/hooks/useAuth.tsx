@@ -250,9 +250,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
                 if (error) {
                     setState((prev) => ({ ...prev, loading: false }));
+
+                    // Supabase wraps trigger errors in the message
+                    // Pass the full message so Auth.tsx can parse it
                     if (error.message.includes("already registered")) {
                         return { error: "An account with this email already exists" };
                     }
+
+                    // DB trigger errors come through here
+                    // e.g. "ORG_NAME_TAKEN: Restaurant name..."
+                    if (error.message.includes("ORG_NAME_TAKEN")) {
+                        return { error: "ORG_NAME_TAKEN: " + error.message };
+                    }
+
                     return { error: error.message };
                 }
 

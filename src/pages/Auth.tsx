@@ -119,6 +119,26 @@ export default function Auth() {
         setSubmitting(false);
 
         if (error) {
+            // ── Handle specific errors ────────────────────────────
+            if (
+                error.includes("ORG_NAME_TAKEN") ||
+                error.includes("already registered") ||
+                error.includes("unique constraint")
+            ) {
+                setErrors({
+                    org_name: "This restaurant name is already registered. " +
+                        "Please use a different name."
+                });
+                toast.error("Restaurant name already taken 🚫");
+                return;
+            }
+
+            if (error.includes("already registered")) {
+                setErrors({ email: "An account with this email already exists" });
+                toast.error("Email already registered");
+                return;
+            }
+
             toast.error(error);
             setErrors({ email: error });
             return;

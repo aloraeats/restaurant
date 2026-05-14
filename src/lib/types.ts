@@ -1,13 +1,9 @@
 // ============================================================
 // types.ts
-// Updated for pure 1% usage billing model.
-// Removed: BillingTier, TierConfig, BILLING_TIERS,
-//          getTierFromBranchCount, calculateFlatFee,
-//          trial_ends_at, billing_tier, trial_days,
-//          InitiatePaymentResponse (no more initiate-payment)
-// Added:   next_invoice_date on Organization,
-//          PayInvoiceResponse,
-//          InvoiceSummary (for dashboard display)
+// Updated for flat-fee billing model.
+// Billing: 1 branch = GH₵500/30days, 2+ branches = GH₵1000/branch/30days
+// Pro-rated for mid-cycle branch additions and deletions.
+// Countdown starts when first branch is created.
 // ============================================================
 
 // ── Database Row Types ────────────────────────────────────────
@@ -15,12 +11,13 @@
 export interface Organization {
     id: string;
     name: string;
+    normalized_name: string;
     subscription_status: SubscriptionStatus;
-    next_invoice_date: string | null; // DATE from DB, null if not set yet
+    billing_cycle_start: string | null; // DATE: set when first branch created
+    next_invoice_date: string | null; // DATE: billing_cycle_start + 30 days
     created_at: string;
 }
 
-// No more 'trial' — active → suspended → expired
 export type SubscriptionStatus = "active" | "suspended" | "expired";
 
 export interface Profile {
@@ -36,7 +33,7 @@ export interface Profile {
 export type OrgRole = "super_admin" | "manager" | "staff";
 
 // Subscriptions table still exists in DB but is no longer
-// used for billing. Keeping type here for future use.
+// actively used for billing. Kept for future use.
 export interface Subscription {
     id: string;
     org_id: string;
@@ -76,6 +73,8 @@ export interface Branch {
     address: string | null;
     deleted_at: string | null;
     created_at: string;
+    billing_start_date: string | null; // DATE: set when branch created
+    billing_end_date: string | null; // DATE: set when branch soft-deleted
 }
 
 export interface BranchStaff {
@@ -165,48 +164,60 @@ export interface AuditLog {
 }
 
 // ── Monthly Invoice ───────────────────────────────────────────
-// Core billing type — generated every 30 days per org
-// flat_fee_* columns kept in DB as zeros (Option B decision)
-// Only usage_fee_total and amount_due matter now
+// Generated every 30 days from billing_cycle_start.
+// Flat fee model:
+//   1 branch  → GH₵500 flat
+//   2+ branches → GH₵1,000 × branch count
+// Pro-rated for mid-cycle additions and deletions.
+// branch_snapshot records every branch's contribution.
 
 export interface MonthlyInvoice {
     id: string;
     org_id: string;
-    period_start: string;       // DATE: start of 30-day period
-    period_end: string;         // DATE: end of 30-day period
-    branch_count: number;       // always 0 in new model
-    flat_fee_per_branch: number; // always 0 in new model
-    flat_fee_total: number;     // always 0 in new model
-    total_qr_orders: number;    // count of served orders
-    total_qr_gmv: number;       // sum of served order totals
-    usage_fee_percent: number;  // always 1.0
-    usage_fee_total: number;    // total_qr_gmv × 0.01
-    amount_due: number;         // = usage_fee_total
+    period_start: string;               // DATE: cycle start
+    period_end: string;               // DATE: cycle end
+    base_amount: number;               // full-cycle branches cost
+    prorated_amount: number;               // mid-cycle additions/deletions
+    amount_due: number;               // base_amount + prorated_amount
     status: InvoiceStatus;
     paystack_reference: string | null;
-    payment_link: string | null; // null — pay button in dashboard only
+    payment_link: string | null;        // always null — pay via dashboard
     paid_at: string | null;
-    due_date: string;           // period_end + 7 days
+    due_date: string;               // period_end + 7 days grace
+    branch_snapshot: BranchSnapshotItem[]; // per-branch billing breakdown
     created_at: string;
     updated_at: string;
 }
 
 export type InvoiceStatus = "unpaid" | "paid" | "overdue" | "waived";
 
+// One entry per branch that was active at any point in the cycle
+export interface BranchSnapshotItem {
+    branch_id: string;
+    branch_name: string;
+    days_active: number;   // days within this cycle
+    cycle_days: number;   // always 30
+    rate: number;   // 500 or 1000 depending on org branch count
+    amount: number;   // pro-rated or full amount for this branch
+    is_full_cycle: boolean;  // true = active entire cycle
+    is_deleted: boolean;  // true = was deleted during cycle
+    was_added: boolean;  // true = was added mid-cycle
+    action: "base" | "added" | "deleted";
+}
+
 // Lightweight version for dashboard invoice list
-// Returned by supabase select with specific columns
 export interface InvoiceSummary {
     id: string;
     period_start: string;
     period_end: string;
-    total_qr_orders: number;
-    total_qr_gmv: number;
-    usage_fee_total: number;
+    base_amount: number;
+    prorated_amount: number;
     amount_due: number;
     status: InvoiceStatus;
     due_date: string;
     paid_at: string | null;
     paystack_reference: string | null;
+    branch_snapshot: BranchSnapshotItem[];
 }
 
 // ── Joined / Enriched Types ───────────────────────────────────
@@ -287,10 +298,10 @@ export interface CreateStaffResponse {
     message: string;
 }
 
-// Returned by pay-invoice edge function
-// User clicks "Pay" on dashboard → gets redirected to Paystack
+// pay-invoice edge function response
+// super_admin clicks Pay → redirected to Paystack authorization_url
 export interface PayInvoiceResponse {
-    authorization_url: string; // redirect here
+    authorization_url: string;
     reference: string;
     amount_due: number;
     invoice_id: string;
@@ -309,7 +320,7 @@ export interface EdgeFunctionError {
     message: string;
 }
 
-// Returned by generate-invoice edge function
+// generate-invoice edge function response
 // Used for manual trigger + cron result logging
 export interface GenerateInvoiceResponse {
     invoices_generated: number;
@@ -373,14 +384,14 @@ export interface CreateTableForm {
     branch_id: string;
 }
 
-// ── Supabase Database type map ────────────────────────────────
+// ── Supabase Database Type Map ────────────────────────────────
 
 export interface Database {
     public: {
         Tables: {
             organizations: {
                 Row: Organization;
-                Insert: Omit<Organization, "id" | "created_at">;
+                Insert: Omit<Organization, "id" | "created_at" | "normalized_name">;
                 Update: Partial<Omit<Organization, "id" | "created_at">>;
             };
             profiles: {
@@ -420,18 +431,12 @@ export interface Database {
             };
             branch_inventory: {
                 Row: BranchInventory;
-                Insert: Omit<
-                    BranchInventory,
-                    "id" | "created_at" | "updated_at"
-                >;
+                Insert: Omit<BranchInventory, "id" | "created_at" | "updated_at">;
                 Update: Partial<Omit<BranchInventory, "id" | "created_at">>;
             };
             restaurant_tables: {
                 Row: RestaurantTable;
-                Insert: Omit<
-                    RestaurantTable,
-                    "id" | "created_at" | "qr_identifier"
-                >;
+                Insert: Omit<RestaurantTable, "id" | "created_at" | "qr_identifier">;
                 Update: Partial<Omit<RestaurantTable, "id" | "created_at">>;
             };
             orders: {
@@ -451,10 +456,7 @@ export interface Database {
             };
             monthly_invoices: {
                 Row: MonthlyInvoice;
-                Insert: Omit<
-                    MonthlyInvoice,
-                    "id" | "created_at" | "updated_at"
-                >;
+                Insert: Omit<MonthlyInvoice, "id" | "created_at" | "updated_at">;
                 Update: Partial<Omit<MonthlyInvoice, "id" | "created_at">>;
             };
         };
@@ -475,8 +477,6 @@ export interface Database {
                 Args: Record<string, never>;
                 Returns: string;
             };
-            // get_billing_tier and get_flat_fee_per_branch removed
-            // — functions dropped in migration 009
         };
     };
 }

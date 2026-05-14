@@ -100,7 +100,7 @@ export default function Dashboard() {
         pendingOrders: 0,
     });
     const [loading, setLoading] = useState(true);
-    const [paymentOpen, setPaymentOpen] = useState(false);
+    const [ setPaymentOpen] = useState(false);
 
     useEffect(() => {
         // ✅ Don't wait for org — user is enough to start loading
@@ -227,7 +227,7 @@ export default function Dashboard() {
         {
             id: "subscribe",
             title: "Subscribe to keep your account active",
-            description: "GH₵200/branch/month after 14-day trial",
+            description: "GH₵500/month for 1 branch · GH₵1,000/branch for multiple",
             completed: org?.subscription_status === "active",
             href: "/dashboard",
         },
@@ -265,13 +265,8 @@ export default function Dashboard() {
 
             {/* ── Subscription card (super_admin + org only) ── */}
             {user?.role === "super_admin" && org && (
-                <>
-                    <SubscriptionCard
-                        org={org}
-                        onPayClick={() => setPaymentOpen(true)}
-                    />
-                    
-                </>
+                
+                    <SubscriptionCard/>   
             )}
 
             {/* ── Stats row ─────────────────────────────────── */}
