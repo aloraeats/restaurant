@@ -408,7 +408,7 @@ export default function MenuManagement() {
             setProdModalOpen(false);
             loadData();
         } catch (err: unknown) {
-            console.error(err);
+            if (import.meta.env.DEV) console.error(err);
             toast.error("Failed to save product");
         }
 

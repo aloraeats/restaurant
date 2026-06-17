@@ -286,9 +286,10 @@ export default function BranchDetail() {
                 </div>
 
                 <script>
-                    // No onload needed — image is already embedded.
-                    window.print();
-                    window.onafterprint = function () { window.close(); };
+                    setTimeout(function () {
+                        window.print();
+                        window.onafterprint = function () { window.close(); };
+                    }, );
                 </script>
             </body>
             </html>
@@ -766,7 +767,18 @@ export default function BranchDetail() {
                                                     size="sm"
                                                     variant="secondary"
                                                     onClick={() => {
-                                                        navigator.clipboard.writeText(menuUrl);
+                                                        if (navigator.clipboard && window.isSecureContext) {
+                                                            navigator.clipboard.writeText(menuUrl);
+                                                        } else {
+                                                            const el = document.createElement("textarea");
+                                                            el.value = menuUrl;
+                                                            el.style.position = "fixed";
+                                                            el.style.left = "-9999px";
+                                                            document.body.appendChild(el);
+                                                            el.select();
+                                                            document.execCommand("copy");
+                                                            document.body.removeChild(el);
+                                                        }
                                                         toast.success("URL copied!");
                                                     }}
                                                 >

@@ -287,12 +287,12 @@ export default function Auth() {
 
                                 <div className="bg-blue-50 rounded-lg p-3">
                                     <p className="text-xs text-blue-700 font-medium">
-                                        🎉 Free to start — only pay 1% of what you earn!
+                                        🎉 Free to start — pay as you go with more features!
                                     </p>
                                 </div>
 
                                 <Input
-                                    label="Your Full Name"
+                                    label="Your Prefered User Name"
                                     type="text"
                                     placeholder="Akosua Mensah"
                                     value={signupForm.full_name}
@@ -381,7 +381,7 @@ export default function Auth() {
                 </div>
 
                 <p className="text-center text-xs text-gray-400 mt-4">
-                    1% of served orders per 30 days • No flat fees 🇬🇭
+                    Sign Up and boost productivity for free • No payment needed.
                 </p>
             </div>
         </div>

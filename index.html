@@ -6,22 +6,57 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Alora Eat</title>
 
-    <!--
-        SPA routing restore — runs BEFORE React loads.
-        Reads the path saved by 404.html and rewrites
-        the browser history so React Router sees the
-        correct URL instead of just "/".
-        Must be the FIRST script in <head>.
-    -->
-    <script>
-        (function () {
-            var redirect = sessionStorage.getItem('spa_redirect');
-            if (redirect && redirect !== '/') {
-                sessionStorage.removeItem('spa_redirect');
-                window.history.replaceState(null, null, redirect);
-            }
-        })();
-    </script>
+	<script>
+		// SPA routing restore — runs BEFORE React loads.
+		// Reads the path saved by 404.html and rewrites
+		// the browser history so React Router sees the
+		// correct URL instead of just "/".
+		// Must be the FIRST script in head to run before any React code
+		.
+
+		(function () {
+		'use strict';
+
+		var redirect = sessionStorage.getItem('spa_redirect');
+
+		// Always remove immediately — even if validation fails below.
+		// We never want a bad value sitting in storage for a second attempt.
+		if (redirect) {
+		sessionStorage.removeItem('spa_redirect');
+		}
+
+		if (!redirect || redirect === '/') return;
+
+		// SECURITY: Re-validate on the reading side too.
+		// We already validated in 404.html before storing, but we
+		// validate again here because:
+		//   1. sessionStorage can be written by other scripts on the page
+		//   2. Defense in depth — never trust stored values blindly
+		//   3. Costs nothing and protects against XSS writing to storage
+		var SAFE_PATH = /^\/[a-zA-Z0-9\-._~:@!$&'()*+,;=%/?#[\]]*$/;
+
+			var isValidRedirect = (
+			typeof redirect === 'string'             &&
+			redirect.length > 1                      &&
+			redirect.length <= 500                   &&
+			redirect.startsWith('/')                 &&
+			!redirect.startsWith('//')               &&
+			!redirect.toLowerCase().includes('javascript:') &&
+			SAFE_PATH.test(redirect)
+			);
+
+			if (!isValidRedirect) {
+			// Validation failed — silently drop it and stay at root.
+			// Do not navigate. Do not log the bad value (could be XSS payload).
+			return;
+			}
+
+			// Safe to restore — rewrites address bar without navigation.
+			// history.replaceState does NOT trigger a page load or fetch.
+			// React Router reads this value when it initialises.
+			window.history.replaceState(null, null, redirect);
+			})();
+		</script>
 
     <!--
         Content Security Policy
@@ -39,47 +74,46 @@
           (kitchen board live updates).
         - frame-src checkout.paystack.com for Paystack iframe.
     -->
-    <meta http-equiv="Content-Security-Policy"
-          content="
-            default-src 'self';
+	<meta http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
 
-            script-src
-                'self'
-                'unsafe-inline'
-                'unsafe-eval'
-                https://static.cloudflareinsights.com;
+        script-src
+            'self'
+            'unsafe-inline'
+            https://static.cloudflareinsights.com;
 
-            style-src
-                'self'
-                'unsafe-inline'
-                https://fonts.googleapis.com;
+        style-src
+            'self'
+            'unsafe-inline'
+            https://fonts.googleapis.com;
 
-            font-src
-                'self'
-                https://fonts.gstatic.com;
+        font-src
+            'self'
+            https://fonts.gstatic.com;
 
-            img-src
-                'self'
-                data:
-                blob:
-                https://*.supabase.co;
+        img-src
+            'self'
+            data:
+            blob:
+            https://*.supabase.co;
 
-            connect-src
-                'self'
-                https://*.supabase.co
-                wss://*.supabase.co
-                https://api.paystack.co
-                https://checkout.paystack.com
-                https://cloudflareinsights.com
-                https://*.cloudflareinsights.com;
+        connect-src
+            'self'
+            https://*.supabase.co
+            wss://*.supabase.co
+            https://api.paystack.co
+            https://checkout.paystack.com
+            https://cloudflareinsights.com
+            https://*.cloudflareinsights.com;
 
-            frame-src
-                https://checkout.paystack.com;
+        frame-src
+            https://checkout.paystack.com;
 
-            worker-src
-                'self'
-                blob:;
-        " />
+        worker-src
+            'self'
+            blob:;
+      " />
 
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
 </head>

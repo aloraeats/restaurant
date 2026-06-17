@@ -9,26 +9,32 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 if (!supabaseUrl || !supabaseAnon) {
-    throw new Error(
-        "Missing Supabase environment variables. " +
-        "Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file."
-    );
+    throw new Error("Application configuration error. Please contact support.");
 }
+
+// ── Secure fetch wrapper ──────────────────────────────────────
+// Intercepts all SDK HTTP calls.
+// Prevents failed requests from logging raw URLs to console.
+const silentFetch: typeof fetch = async (input, init) => {
+    try {
+        return await fetch(input, init);
+    } catch (err) {
+        if (err instanceof TypeError && err.message === "Failed to fetch") {
+            throw new TypeError("Network unavailable");
+        }
+        throw err;
+    }
+};
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnon, {
     auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-
-        // ✅ FIX 1: No custom storageKey
-        // Custom key = custom lock name = lock contention
-        // = NavigatorLockAcquireTimeoutError
-
-        // ✅ FIX 2: Bypass Web Locks API entirely
-        // Prevents lock contention when multiple auth operations
-        // fire simultaneously on page load
         lock: async (_name, _acquireTimeout, fn) => fn(),
+    },
+    global: {
+        fetch: silentFetch,   // ← add this line only
     },
     realtime: {
         params: {

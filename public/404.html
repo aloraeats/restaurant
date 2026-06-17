@@ -1,26 +1,63 @@
 <!-- public/404.html -->
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Alora Eat</title>
-    <script>
-        // GitHub Pages SPA routing fix
-        // GitHub Pages returns 404 for any path that isn't a real file
-        // We save the intended path to sessionStorage then redirect to /
-        // index.html reads it back and restores the route before React loads
-        sessionStorage.setItem(
-            'spa_redirect',
-            window.location.pathname +
-            window.location.search +
-            window.location.hash
-        );
-        window.location.replace('/');
-    </script>
-</head>
-<body>
-    <div style="
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Alora Eat</title>
+		<script>
+			// GitHub Pages SPA routing fix
+			// GitHub Pages returns 404 for any path that isn't a real file.
+			// We save the intended path to sessionStorage then redirect to /
+			// index.html reads it back and restores the route before React loads.
+
+			(function () {
+			'use strict';
+
+			var path   = window.location.pathname;
+			var search = window.location.search;
+			var hash   = window.location.hash;
+
+			// SECURITY: Validate path before storing.
+			// We only accept paths that:
+			//   - Start with a single slash (not // which is protocol-relative)
+			//   - Contain only URL-safe characters
+			//   - Are under 500 chars (no legitimate app path is longer)
+			// This blocks javascript: URLs, protocol-relative redirects,
+			// and other open redirect payloads before they ever get stored.
+			var SAFE_PATH = /^\/[a-zA-Z0-9\-._~:@!$&'()*+,;=%/?#[\]]*$/;
+
+			var isValidPath = (
+			typeof path === 'string'        &&
+			path.length > 1                 &&  // not just "/"
+			path.length <= 500              &&
+			path.startsWith('/')            &&
+			!path.startsWith('//')          &&  // block protocol-relative
+			!path.toLowerCase().includes('javascript:') &&
+			SAFE_PATH.test(path)
+			);
+
+			if (!isValidPath) {
+			// Path is invalid or suspicious — drop it, go to root.
+			window.location.replace('/');
+			return;
+			}
+
+			var fullPath = path + (search || '') + (hash || '');
+
+			// Final length check on combined value
+			if (fullPath.length > 500) {
+			window.location.replace('/');
+			return;
+			}
+
+			sessionStorage.setItem('spa_redirect', fullPath);
+			window.location.replace('/');
+			})();
+		</script>
+	</head>
+	<body>
+		<div style="
         display: flex;
         align-items: center;
         justify-content: center;
@@ -28,10 +65,10 @@
         font-family: system-ui, sans-serif;
         background: #f9fafb;
     ">
-        <div style="text-align: center;">
-            <div style="font-size: 48px; margin-bottom: 16px;">🍽️</div>
-            <p style="color: #6b7280; font-size: 14px;">Loading...</p>
-        </div>
-    </div>
-</body>
+			<div style="text-align: center;">
+				<div style="font-size: 48px; margin-bottom: 16px;">🍽️</div>
+				<p style="color: #6b7280; font-size: 14px;">Loading...</p>
+			</div>
+		</div>
+	</body>
 </html>

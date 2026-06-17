@@ -187,7 +187,7 @@ export default function Dashboard() {
 
         } catch (err) {
             // ✅ Catch-all — dashboard never freezes even on error
-            console.error("Dashboard load error:", err);
+            if (import.meta.env.DEV) console.error("Dashboard load error:", err);
         } finally {
             // ✅ ALWAYS stop loading — success or failure
             setLoading(false);

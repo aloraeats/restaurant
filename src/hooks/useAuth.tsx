@@ -77,12 +77,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // ── Load profile + org ────────────────────────────────────
     const loadUserData = useCallback(async (userId: string) => {
-        // Already loading this user — skip
-        if (loadingUserIdRef.current === userId) {
+    if (loadingUserIdRef.current === userId) {
+        // SECURITY: DEV guard — this log was added to debug the duplicate
+        // loadUserData calls that occurred before the ref guard was added.
+        // Kept for regression debugging but hidden in production to avoid
+        // exposing user IDs in the console.
+        if (import.meta.env.DEV) {
             console.log("loadUserData: skipping duplicate for", userId);
-            return;
         }
-        loadingUserIdRef.current = userId;
+        return;
+    }
+    loadingUserIdRef.current = userId;
+    // ... rest unchanged
 
         try {
             const { data: profile, error: profileError } = await supabase
@@ -103,21 +109,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         .single();
 
                     if (retryErr || !retry) {
-                        console.error("Profile load failed:", retryErr?.message);
+                        if (import.meta.env.DEV) console.error("Profile load failed:", retryErr?.message);
                         setState({ user: null, org: null, loading: false });
                         return;
                     }
                     await loadOrgForProfile(retry as Profile);
                     return;
                 }
-                console.error("Profile error:", profileError?.message);
+                if (import.meta.env.DEV) console.error("Profile error:", profileError?.message);
                 setState({ user: null, org: null, loading: false });
                 return;
             }
 
             await loadOrgForProfile(profile as Profile);
         } catch (err) {
-            console.error("loadUserData error:", err);
+            if (import.meta.env.DEV) console.error("loadUserData error:", err);
             setState({ user: null, org: null, loading: false });
         } finally {
             loadingUserIdRef.current = null;
@@ -125,57 +131,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [loadOrgForProfile]);
 
     // ── Single auth listener — runs once for the whole app ────
-    useEffect(() => {
-        let mounted = true;
+useEffect(() => {
+    let mounted = true;
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            (event, session) => {
-                if (!mounted) return;
-                console.log("Auth event:", event);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        (event, session) => {
+            if (!mounted) return;
 
-                if (event === "SIGNED_OUT") {
-                    loadingUserIdRef.current = null;
-                    setState({ user: null, org: null, loading: false });
-                    return;
-                }
+            // SECURITY: DEV guard — auth event names and session state
+            // are useful during local debugging but should not appear
+            // in production console where they reveal auth flow details.
+            if (import.meta.env.DEV) console.log("Auth event:", event);
 
-                if (event === "INITIAL_SESSION") {
-                    if (session?.user) {
-                        loadUserData(session.user.id);
-                    } else {
-                        setState({ user: null, org: null, loading: false });
-                    }
-                    return;
-                }
-
-                if (event === "SIGNED_IN" && session?.user) {
-                    // Only load if not already loaded for this user
-                    setState((prev) => {
-                        if (prev.user?.id === session.user.id && !prev.loading) {
-                            console.log("Auth event: SIGNED_IN skipped — already loaded");
-                            return prev;
-                        }
-                        loadUserData(session.user.id);
-                        return prev;
-                    });
-                    return;
-                }
-
-                if (event === "TOKEN_REFRESHED" && session?.user) {
-                    // Only reload if user data is missing
-                    setState((prev) => {
-                        if (!prev.user) loadUserData(session.user.id);
-                        return prev;
-                    });
-                }
+            if (event === "SIGNED_OUT") {
+                loadingUserIdRef.current = null;
+                setState({ user: null, org: null, loading: false });
+                return;
             }
-        );
 
-        return () => {
-            mounted = false;
-            subscription.unsubscribe();
-        };
-    }, [loadUserData]);
+            if (event === "INITIAL_SESSION") {
+                if (session?.user) {
+                    loadUserData(session.user.id);
+                } else {
+                    setState({ user: null, org: null, loading: false });
+                }
+                return;
+            }
+
+            if (event === "SIGNED_IN" && session?.user) {
+                setState((prev) => {
+                    if (prev.user?.id === session.user.id && !prev.loading) {
+                        // SECURITY: DEV guard — this log was added to debug
+                        // the duplicate SIGNED_IN firing issue (now fixed via
+                        // Context). Kept for future debugging but hidden in
+                        // production to avoid leaking user session state.
+                        if (import.meta.env.DEV) {
+                            console.log("Auth event: SIGNED_IN skipped — already loaded");
+                        }
+                        return prev;
+                    }
+                    loadUserData(session.user.id);
+                    return prev;
+                });
+                return;
+            }
+
+            if (event === "TOKEN_REFRESHED" && session?.user) {
+                setState((prev) => {
+                    if (!prev.user) loadUserData(session.user.id);
+                    return prev;
+                });
+            }
+        }
+    );
+
+    return () => {
+        mounted = false;
+        subscription.unsubscribe();
+    };
+}, [loadUserData]);
 
     // ── signIn ────────────────────────────────────────────────
     const signIn = useCallback(
@@ -283,7 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.removeItem("remember_me");
             await supabase.auth.signOut();
         } catch (err) {
-            console.error("Sign out error:", err);
+            if (import.meta.env.DEV) console.error("Sign out error:", err);
             setState({ user: null, org: null, loading: false });
         }
     }, []);
