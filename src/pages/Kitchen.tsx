@@ -263,13 +263,40 @@ export default function Kitchen() {
             return;
         }
 
+        // Restricted roles (kitchen + waiter) get no price columns.
+        // branch_manager is profiles.role = 'staff' but needs prices,
+        // so we check userBranchRole explicitly to allow them through.
+        // Defaults to restricted when userBranchRole is still null —
+        // prices are never accidentally exposed during loading.
+        const isRestricted =
+            user?.role === "staff" && userBranchRole !== "branch_manager";
+
+        const selectFields = isRestricted
+            ? // No total_amount, no unit_price
+              `
+              id,
+              branch_id,
+              table_id,
+              session_id,
+              status,
+              order_type,
+              notes,
+              created_at,
+              updated_at,
+              restaurant_tables(id, table_name, qr_identifier),
+              order_items(id, order_id, product_id, quantity, notes, created_at,
+                  products(id, name, base_price))
+              `
+            : // Full data for privileged roles
+              `
+              *,
+              restaurant_tables(id, table_name, qr_identifier),
+              order_items(*, products(id, name, base_price))
+              `;
+
         let query = supabase
             .from("orders")
-            .select(`
-        *,
-        restaurant_tables(id, table_name, qr_identifier),
-        order_items(*, products(id, name, base_price))
-      `)
+            .select(selectFields)
             .in("branch_id", branchIds)
             .order("created_at", { ascending: false });
 
