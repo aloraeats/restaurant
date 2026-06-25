@@ -40,7 +40,7 @@ jobs:
           # More reliable than writing .env file
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_FRONTEND_URL: https://aloraeat.xyz
+          VITE_FRONTEND_URL: https://v1.aloraeat.xyz
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4

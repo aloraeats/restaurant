@@ -1,9 +1,9 @@
 // ============================================================
 // types.ts
-// Updated for flat-fee billing model.
-// Billing: 1 branch = GH₵500/30days, 2+ branches = GH₵1000/branch/30days
-// Pro-rated for mid-cycle branch additions and deletions.
-// Countdown starts when first branch is created.
+// v1: billing invoice types removed (MonthlyInvoice,
+// InvoiceSummary, BranchSnapshotItem, InvoiceStatus,
+// PayInvoiceResponse, GenerateInvoiceResponse).
+// Subscription + PaymentHistory kept — still exist in DB.
 // ============================================================
 
 // ── Database Row Types ────────────────────────────────────────
@@ -13,8 +13,8 @@ export interface Organization {
     name: string;
     normalized_name: string;
     subscription_status: SubscriptionStatus;
-    billing_cycle_start: string | null; // DATE: set when first branch created
-    next_invoice_date: string | null; // DATE: billing_cycle_start + 30 days
+    billing_cycle_start: string | null;
+    next_invoice_date: string | null;
     created_at: string;
 }
 
@@ -32,8 +32,8 @@ export interface Profile {
 
 export type OrgRole = "super_admin" | "manager" | "staff";
 
-// Subscriptions table still exists in DB but is no longer
-// actively used for billing. Kept for future use.
+// Subscriptions table still exists in DB but is not
+// actively used in v1. Kept for DB compatibility.
 export interface Subscription {
     id: string;
     org_id: string;
@@ -52,6 +52,7 @@ export type PlanType = "monthly" | "yearly";
 export type SubscriptionStatusDetail =
     "pending" | "active" | "suspended" | "expired";
 
+// Kept for DB compatibility — not used in v1 UI.
 export interface PaymentHistory {
     id: string;
     subscription_id: string | null;
@@ -73,8 +74,8 @@ export interface Branch {
     address: string | null;
     deleted_at: string | null;
     created_at: string;
-    billing_start_date: string | null; // DATE: set when branch created
-    billing_end_date: string | null; // DATE: set when branch soft-deleted
+    billing_start_date: string | null;
+    billing_end_date: string | null;
 }
 
 export interface BranchStaff {
@@ -150,6 +151,31 @@ export interface OrderItem {
     created_at: string;
 }
 
+// Price-hidden view for kitchen and waiter roles.
+// Mirrors Order exactly but without total_amount.
+export interface OrderStaffView {
+    id: string;
+    branch_id: string;
+    table_id: string;
+    session_id: string;
+    status: OrderStatus;
+    order_type: string;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+// Price-hidden view for kitchen and waiter roles.
+// Mirrors OrderItem exactly but without unit_price.
+export interface OrderItemStaffView {
+    id: string;
+    order_id: string;
+    product_id: string;
+    quantity: number;
+    notes: string | null;
+    created_at: string;
+}
+
 export interface AuditLog {
     id: string;
     org_id: string | null;
@@ -161,63 +187,6 @@ export interface AuditLog {
     new_data: Record<string, unknown> | null;
     ip_address: string | null;
     created_at: string;
-}
-
-// ── Monthly Invoice ───────────────────────────────────────────
-// Generated every 30 days from billing_cycle_start.
-// Flat fee model:
-//   1 branch  → GH₵500 flat
-//   2+ branches → GH₵1,000 × branch count
-// Pro-rated for mid-cycle additions and deletions.
-// branch_snapshot records every branch's contribution.
-
-export interface MonthlyInvoice {
-    id: string;
-    org_id: string;
-    period_start: string;               // DATE: cycle start
-    period_end: string;               // DATE: cycle end
-    base_amount: number;               // full-cycle branches cost
-    prorated_amount: number;               // mid-cycle additions/deletions
-    amount_due: number;               // base_amount + prorated_amount
-    status: InvoiceStatus;
-    paystack_reference: string | null;
-    payment_link: string | null;        // always null — pay via dashboard
-    paid_at: string | null;
-    due_date: string;               // period_end + 7 days grace
-    branch_snapshot: BranchSnapshotItem[]; // per-branch billing breakdown
-    created_at: string;
-    updated_at: string;
-}
-
-export type InvoiceStatus = "unpaid" | "paid" | "overdue" | "waived";
-
-// One entry per branch that was active at any point in the cycle
-export interface BranchSnapshotItem {
-    branch_id: string;
-    branch_name: string;
-    days_active: number;   // days within this cycle
-    cycle_days: number;   // always 30
-    rate: number;   // 500 or 1000 depending on org branch count
-    amount: number;   // pro-rated or full amount for this branch
-    is_full_cycle: boolean;  // true = active entire cycle
-    is_deleted: boolean;  // true = was deleted during cycle
-    was_added: boolean;  // true = was added mid-cycle
-    action: "base" | "added" | "deleted";
-}
-
-// Lightweight version for dashboard invoice list
-export interface InvoiceSummary {
-    id: string;
-    period_start: string;
-    period_end: string;
-    base_amount: number;
-    prorated_amount: number;
-    amount_due: number;
-    status: InvoiceStatus;
-    due_date: string;
-    paid_at: string | null;
-    paystack_reference: string | null;
-    branch_snapshot: BranchSnapshotItem[];
 }
 
 // ── Joined / Enriched Types ───────────────────────────────────
@@ -298,15 +267,6 @@ export interface CreateStaffResponse {
     message: string;
 }
 
-// pay-invoice edge function response
-// super_admin clicks Pay → redirected to Paystack authorization_url
-export interface PayInvoiceResponse {
-    authorization_url: string;
-    reference: string;
-    amount_due: number;
-    invoice_id: string;
-}
-
 export interface RegenerateQrResponse {
     table_id: string;
     table_name: string;
@@ -318,22 +278,6 @@ export interface RegenerateQrResponse {
 export interface EdgeFunctionError {
     error: string;
     message: string;
-}
-
-// generate-invoice edge function response
-// Used for manual trigger + cron result logging
-export interface GenerateInvoiceResponse {
-    invoices_generated: number;
-    skipped: number;
-    failed: number;
-    period: string;
-    results: Array<{
-        org_id: string;
-        org_name: string;
-        amount_due?: number;
-        status: "created" | "skipped" | "failed";
-        reason?: string;
-    }>;
 }
 
 // ── UI State Types ────────────────────────────────────────────
@@ -449,15 +393,22 @@ export interface Database {
                 Insert: Omit<OrderItem, "id" | "created_at">;
                 Update: never;
             };
+
+            orders_staff_view: {
+                Row: OrderStaffView;
+                Insert: never;
+                Update: never;
+            };
+            order_items_staff_view: {
+                Row: OrderItemStaffView;
+                Insert: never;
+                Update: never;
+            };
+
             audit_logs: {
                 Row: AuditLog;
                 Insert: Omit<AuditLog, "id" | "created_at">;
                 Update: never;
-            };
-            monthly_invoices: {
-                Row: MonthlyInvoice;
-                Insert: Omit<MonthlyInvoice, "id" | "created_at" | "updated_at">;
-                Update: Partial<Omit<MonthlyInvoice, "id" | "created_at">>;
             };
         };
         Functions: {

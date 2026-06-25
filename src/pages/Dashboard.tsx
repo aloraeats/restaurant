@@ -1,14 +1,12 @@
 // ============================================================
 // Dashboard.tsx
-// Fixed: handles org being null (staff role), added proper
-// loading guards, all roles see appropriate content.
+// v1: billing/subscription UI removed.
 // ============================================================
 
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { supabase } from "../lib/supabase";
-import SubscriptionCard from "../components/SubscriptionCard";
 import { Spinner, Badge, EmptyState } from "../components/UI";
 import {
     formatCurrency,
@@ -19,7 +17,7 @@ import {
 } from "../utils/helpers";
 import type { Branch, Order, SetupStep } from "../lib/types";
 
-// ✅ Fixed StatCard — handles any number size
+// ── StatCard ──────────────────────────────────────────────────
 function StatCard({
     label, value, icon, sub,
 }: {
@@ -30,28 +28,21 @@ function StatCard({
 }) {
     return (
         <div className="card flex items-start gap-3 overflow-hidden">
-            {/* flex-shrink-0 stops icon squishing when number is long */}
             <div className="text-2xl flex-shrink-0">{icon}</div>
-            {/* min-w-0 is CRITICAL — allows flex child to shrink */}
             <div className="min-w-0 flex-1">
-                <p className="text-xl font-bold text-gray-900
-                              break-words leading-tight">
+                <p className="text-xl font-bold text-gray-900 break-words leading-tight">
                     {value}
                 </p>
-                <p className="text-sm text-gray-500 mt-0.5">
-                    {label}
-                </p>
+                <p className="text-sm text-gray-500 mt-0.5">{label}</p>
                 {sub && (
-                    <p className="text-xs text-gray-400 mt-0.5">
-                        {sub}
-                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
                 )}
             </div>
         </div>
     );
 }
 
-// ── Setup checklist item ──────────────────────────────────────
+// ── ChecklistItem ─────────────────────────────────────────────
 function ChecklistItem({ step }: { step: SetupStep }) {
     return (
         <Link
@@ -76,9 +67,9 @@ function ChecklistItem({ step }: { step: SetupStep }) {
             </div>
             <div className="min-w-0 flex-1">
                 <p className={`text-sm font-medium ${step.completed
-                        ? "text-green-700 line-through"
-                        : "text-gray-900"
-                    }`}>
+                    ? "text-green-700 line-through"
+                    : "text-gray-900"
+                }`}>
                     {step.title}
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">{step.description}</p>
@@ -87,7 +78,7 @@ function ChecklistItem({ step }: { step: SetupStep }) {
     );
 }
 
-// ── Main component ────────────────────────────────────────────
+// ── Dashboard ─────────────────────────────────────────────────
 export default function Dashboard() {
     const { user, org } = useAuth();
 
@@ -100,27 +91,20 @@ export default function Dashboard() {
         pendingOrders: 0,
     });
     const [loading, setLoading] = useState(true);
-    const [ setPaymentOpen] = useState(false);
 
     useEffect(() => {
-        // ✅ Don't wait for org — user is enough to start loading
-        // org can be null for staff roles — we handle that below
         if (user) {
             loadDashboardData();
         }
-    }, [user?.id]); // ← depend on user.id not org, so staff don't get stuck
+    }, [user?.id]);
 
     async function loadDashboardData() {
         setLoading(true);
 
         try {
-            // ── Fetch branches ────────────────────────────────
-            // For super_admin/manager: fetch by org_id
-            // For staff: fetch branches they're assigned to
             let branchData: Branch[] = [];
 
             if (org?.id) {
-                // super_admin or manager — fetch all org branches
                 const { data, error } = await supabase
                     .from("branches")
                     .select("*")
@@ -134,7 +118,6 @@ export default function Dashboard() {
                     branchData = (data as Branch[]) || [];
                 }
             } else if (user?.id) {
-                // Staff role — fetch their assigned branches
                 const { data, error } = await supabase
                     .from("branch_staff")
                     .select("branches(*)")
@@ -143,7 +126,6 @@ export default function Dashboard() {
                 if (error) {
                     console.warn("Branch staff fetch error:", error.message);
                 } else {
-                    // Extract branches from join result
                     branchData = (data || [])
                         .map((bs: any) => bs.branches)
                         .filter(Boolean) as Branch[];
@@ -152,8 +134,6 @@ export default function Dashboard() {
 
             setBranches(branchData);
 
-            // ── Fetch recent orders ───────────────────────────
-            // Only fetch if we have branches to query
             if (branchData.length > 0) {
                 const branchIds = branchData.map((b) => b.id);
 
@@ -170,7 +150,6 @@ export default function Dashboard() {
                     const orders = (orderData as Order[]) || [];
                     setRecentOrders(orders);
 
-                    // Calculate stats
                     const today = new Date().toISOString().split("T")[0];
                     const todayOrders = orders.filter(
                         (o) => o.created_at.startsWith(today) && o.status !== "cancelled"
@@ -186,15 +165,14 @@ export default function Dashboard() {
             }
 
         } catch (err) {
-            // ✅ Catch-all — dashboard never freezes even on error
             if (import.meta.env.DEV) console.error("Dashboard load error:", err);
         } finally {
-            // ✅ ALWAYS stop loading — success or failure
             setLoading(false);
         }
     }
 
     // ── Setup checklist (super_admin only) ────────────────────
+    // v1: subscribe step removed
     const setupSteps: SetupStep[] = [
         {
             id: "branch",
@@ -224,19 +202,11 @@ export default function Dashboard() {
             completed: false,
             href: "/branches",
         },
-        {
-            id: "subscribe",
-            title: "Subscribe to keep your account active",
-            description: "GH₵500/month for 1 branch · GH₵1,000/branch for multiple",
-            completed: org?.subscription_status === "active",
-            href: "/dashboard",
-        },
     ];
 
     const completedSteps = setupSteps.filter((s) => s.completed).length;
     const allDone = completedSteps === setupSteps.length;
 
-    // ── Loading state ─────────────────────────────────────────
     if (loading) {
         return (
             <div className="page-container flex items-center justify-center min-h-64">
@@ -262,12 +232,6 @@ export default function Dashboard() {
                     })}
                 </p>
             </div>
-
-            {/* ── Subscription card (super_admin + org only) ── */}
-            {user?.role === "super_admin" && org && (
-                
-                    <SubscriptionCard/>   
-            )}
 
             {/* ── Stats row ─────────────────────────────────── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

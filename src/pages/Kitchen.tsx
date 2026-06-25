@@ -29,12 +29,14 @@ function OrderCard({
     order,
     canUpdate,
     isWaiter,
+    showPrices,
     onStatusChange,
     updating,
 }: {
     order: OrderWithDetails;
     canUpdate: boolean;
     isWaiter: boolean;
+    showPrices: boolean;
     onStatusChange: (id: string, status: string) => void;
     updating: string | null;
 }) {
@@ -74,9 +76,13 @@ function OrderCard({
                         {timeAgo(order.created_at)} • {formatDateTime(order.created_at)}
                     </p>
                 </div>
-                <p className="font-bold text-green-700">
-                    {formatCurrency(order.total_amount)}
-                </p>
+
+                {/* Total — hidden from kitchen and waiter */}
+                {showPrices && (
+                    <p className="font-bold text-green-700">
+                        {formatCurrency(order.total_amount)}
+                    </p>
+                )}
             </div>
 
             {/* Order items */}
@@ -93,9 +99,13 @@ function OrderCard({
                                 </p>
                             )}
                         </div>
-                        <span className="text-sm text-gray-500 flex-shrink-0">
-                            {formatCurrency(item.unit_price * item.quantity)}
-                        </span>
+
+                        {/* Per-item price — hidden from kitchen and waiter */}
+                        {showPrices && (
+                            <span className="text-sm text-gray-500 flex-shrink-0">
+                                {formatCurrency(item.unit_price * item.quantity)}
+                            </span>
+                        )}
                     </div>
                 ))}
             </div>
@@ -362,6 +372,11 @@ export default function Kitchen() {
         canUpdate || userBranchRole === "waiter" || userBranchRole === "branch_manager";
     const effectiveIsWaiter = userBranchRole === "waiter";
 
+    const showPrices: boolean =
+    user?.role === "super_admin" ||
+    user?.role === "manager" ||
+    userBranchRole === "branch_manager";
+
     // Group orders by status for kanban-style view
     const pendingOrders = orders.filter((o) => o.status === "pending");
     const preparingOrders = orders.filter((o) => o.status === "preparing");
@@ -456,6 +471,7 @@ export default function Kitchen() {
                                         order={order}
                                         canUpdate={effectiveCanUpdate}
                                         isWaiter={effectiveIsWaiter}
+                                        showPrices={showPrices}
                                         onStatusChange={handleStatusChange}
                                         updating={updating}
                                     />

@@ -10,7 +10,6 @@ import Branches from "./pages/Branches";
 import BranchDetail from "./pages/BranchDetail";
 import Kitchen from "./pages/Kitchen";
 import Customer from "./pages/Customer";
-import PaymentCallback from "./pages/PaymentCallback";
 
 const basename = "/";
 
@@ -66,7 +65,6 @@ export default function App() {
                     useAuth() if needed, but routing won't redirect it.
                 */}
                 <Route path="/menu/:qrId" element={<Customer />} />
-                <Route path="/payment-callback" element={<PaymentCallback />} />
 
                 {/*
                     ── Auth route ───────────────────────────────────────
