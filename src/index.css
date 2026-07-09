@@ -9,7 +9,7 @@
 @layer base {
     /* Ghana-inspired font — feel free to swap */
     body {
-        @apply bg-gray-50 text-gray-900 antialiased;
+        @apply bg-stone-50 text-gray-900 antialiased;
         font-family: "Inter", system-ui, -apple-system, sans-serif;
     }
 
@@ -27,7 +27,7 @@
 @layer components {
     /* Reusable card base */
     .card {
-        @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+        @apply bg-white rounded-xl shadow-sm border border-stone-100 p-6;
     }
 
     /* Page container */

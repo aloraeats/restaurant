@@ -129,10 +129,10 @@ export interface RestaurantTable {
 export interface Order {
     id: string;
     branch_id: string;
-    table_id: string;
+    table_id: string | null;
     session_id: string;
     status: OrderStatus;
-    order_type: string;
+    order_type: "dine_in" | "kiosk";
     notes: string | null;
     total_amount: number;
     created_at: string;

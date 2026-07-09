@@ -2,7 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
 import Layout from "./components/Layout";
-
+import Kiosk from "./pages/Kiosk";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import MenuManagement from "./pages/Menu";
@@ -65,7 +65,7 @@ export default function App() {
                     useAuth() if needed, but routing won't redirect it.
                 */}
                 <Route path="/menu/:qrId" element={<Customer />} />
-
+                <Route path="/kiosk/:branchId" element={<Kiosk />} />
                 {/*
                     ── Auth route ───────────────────────────────────────
                     Shows login page, redirects to /dashboard if logged in.

@@ -90,13 +90,48 @@ export default function Dashboard() {
         todayRevenue: 0,
         pendingOrders: 0,
     });
+    
     const [loading, setLoading] = useState(true);
+    const [userBranchRole, setUserBranchRole] = useState<string | null>(null);
+    const [branchRoleLoaded, setBranchRoleLoaded] = useState(false);
 
+    // Resolve branch role first, then load dashboard data.
+    // For non-staff roles, skip the branch_staff query entirely
+    // and mark as loaded immediately so dashboard doesn't wait.
     useEffect(() => {
-        if (user) {
+        if (!user) return;
+
+        if (user.role !== "staff") {
+            // super_admin and manager — no branch role needed
+            setBranchRoleLoaded(true);
+            return;
+        }
+
+        // staff — fetch branch role before loading dashboard
+        supabase
+            .from("branch_staff")
+            .select("role")
+            .eq("profile_id", user.id)
+            .limit(1)
+            .maybeSingle()
+            .then(({ data }) => {
+                setUserBranchRole(data?.role || null);
+                setBranchRoleLoaded(true);
+            });
+    }, [user?.id]);
+
+    // Only runs after branch role is resolved —
+    // query is always correct on first load, no null gap
+    useEffect(() => {
+        if (branchRoleLoaded) {
             loadDashboardData();
         }
-    }, [user?.id]);
+    }, [branchRoleLoaded]);
+
+    const showPrices: boolean =
+        user?.role === "super_admin" ||
+        user?.role === "manager" ||
+        userBranchRole === "branch_manager";
 
     async function loadDashboardData() {
         setLoading(true);
@@ -137,9 +172,17 @@ export default function Dashboard() {
             if (branchData.length > 0) {
                 const branchIds = branchData.map((b) => b.id);
 
+                // Restricted roles don't get total_amount from the server
+                const isRestricted =
+                    user?.role === "staff" && userBranchRole !== "branch_manager";
+
+                const orderSelectFields = isRestricted
+                    ? "id, branch_id, table_id, session_id, status, order_type, notes, created_at, updated_at"
+                    : "*";
+
                 const { data: orderData, error: orderError } = await supabase
                     .from("orders")
-                    .select("*")
+                    .select(orderSelectFields)
                     .in("branch_id", branchIds)
                     .order("created_at", { ascending: false })
                     .limit(20);
@@ -245,17 +288,20 @@ export default function Dashboard() {
                     label="Orders today"
                     value={stats.todayOrders}
                 />
+                
                 <StatCard
                     icon="💰"
                     label="Revenue today"
-                    value={formatCurrency(stats.todayRevenue)}
+                    value={showPrices ? formatCurrency(stats.todayRevenue) : "—"}
                 />
+
                 <StatCard
                     icon="⏳"
                     label="Pending orders"
                     value={stats.pendingOrders}
                     sub="Awaiting kitchen"
                 />
+                
             </div>
 
             {/* ── Setup checklist (super_admin, not done) ───── */}
@@ -372,9 +418,11 @@ export default function Dashboard() {
                                         {orderStatusLabel(order.status)}
                                     </Badge>
                                     <div>
-                                        <p className="text-sm text-gray-700 font-medium">
-                                            {formatCurrency(order.total_amount)}
-                                        </p>
+                                        {showPrices && (
+                                            <p className="text-sm text-gray-700 font-medium">
+                                                {formatCurrency(order.total_amount)}
+                                            </p>
+                                        )}
                                         <p className="text-xs text-gray-400">
                                             {timeAgo(order.created_at)}
                                         </p>

@@ -1,5 +1,5 @@
 // ============================================================
-// Kitchen.tsx
+// Kitchen.tsx                          line 70
 // Real-time order board for kitchen + waiter staff
 // Kitchen: VIEW only (hands are busy cooking!)
 // Waiter: can mark orders as served
@@ -66,7 +66,12 @@ function OrderCard({
                 <div>
                     <div className="flex items-center gap-2">
                         <p className="font-bold text-gray-900 text-sm">
-                            {order.restaurant_tables?.table_name || "Unknown Table"}
+                            {order.restaurant_tables?.table_name ||
+                                (order.notes?.match(/^\[KIOSK:([A-Z]{2}\d{1,2})\]/)
+                                    ? `🎫 ${order.notes.match(/^\[KIOSK:([A-Z]{2}\d{1,2})\]/)![1]}`
+                                    : "Unknown Table"
+                                )
+                            }
                         </p>
                         <Badge className={orderStatusColor(order.status)}>
                             {orderStatusLabel(order.status)}
@@ -110,14 +115,19 @@ function OrderCard({
                 ))}
             </div>
 
-            {/* Order notes */}
-            {order.notes && (
-                <div className="bg-amber-50 rounded-xl px-3 py-2">
-                    <p className="text-xs text-amber-700 break-words whitespace-normal">
-                        <span className="font-medium">Order note:</span> {order.notes}
-                    </p>
-                </div>
-            )}
+            {/* Strip kiosk tag from notes before displaying */}
+            {(() => {
+                const displayNotes = order.notes
+                    ?.replace(/^\[KIOSK:[A-Z]{2}\d{1,2}\]\s*/, "")
+                    .trim();
+                return displayNotes ? (
+                    <div className="bg-amber-50 rounded-xl px-3 py-2">
+                        <p className="text-xs text-amber-700 break-words whitespace-normal">
+                            <span className="font-medium">Order note:</span> {displayNotes}
+                        </p>
+                    </div>
+                ) : null;
+            })()}
 
             {/* Status actions */}
             {canUpdate && order.status !== "cancelled" && order.status !== "served" && (
@@ -298,7 +308,7 @@ export default function Kitchen() {
             .from("orders")
             .select(selectFields)
             .in("branch_id", branchIds)
-            .order("created_at", { ascending: false });
+            .order("created_at", { ascending: true });
 
         // Status filter
         if (statusFilter === "active") {

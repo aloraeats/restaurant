@@ -2,10 +2,11 @@
 // Layout.tsx
 // Fixed: null-safe org checks, staff role handled properly
 // ============================================================
-import { supabase } from "../lib/supabase";
+
 import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { supabase } from "../lib/supabase";
 import { Spinner, ToastContainer } from "./UI";
 import { isOrgAccessible } from "../utils/helpers";
 import type { OrgRole } from "../lib/types";
@@ -42,24 +43,17 @@ const NAV_ITEMS: NavItem[] = [
         icon: "👨‍🍳",
         roles: ["super_admin", "manager", "staff"],
     },
-    
 ];
 
 interface LayoutProps {
     children: React.ReactNode;
 }
 
-export default function Layout({ children }: LayoutProps) {
-    const { user, org, loading, signOut } = useAuth();
-    const location = useLocation();
-    const navigate = useNavigate();
-    const [sidebarOpen, setSidebarOpen] = useState(false);
-
 // ── Kiosk nav link ────────────────────────────────────────────
+// Defined OUTSIDE Layout — KioskNavLink is its own component.
 // Kiosk requires a branchId in the URL so it can't be a static
-// NAV_ITEMS entry. For super_admin and manager we link to
-// /branches so they can pick a branch first. For staff we fetch
-// their first assigned branch and link directly to the kiosk.
+// NAV_ITEMS entry. Only staff roles see this link.
+// super_admin and manager never see it — they don't use the kiosk.
 function KioskNavLink({
     role,
     userId,
@@ -73,7 +67,6 @@ function KioskNavLink({
     const [kioskHref, setKioskHref] = useState<string | null>(null);
 
     useEffect(() => {
-        // Only staff roles get the kiosk link
         if (role !== "staff") return;
 
         supabase
@@ -89,7 +82,6 @@ function KioskNavLink({
             });
     }, [role, userId]);
 
-    // super_admin and manager never see this link
     if (role !== "staff" || !kioskHref) return null;
 
     const isActive = location.pathname.startsWith("/kiosk");
@@ -113,6 +105,13 @@ function KioskNavLink({
     );
 }
 
+// ── Layout ────────────────────────────────────────────────────
+export default function Layout({ children }: LayoutProps) {
+    const { user, org, loading, signOut } = useAuth();
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
     // ── Auth loading ──────────────────────────────────────────
     if (loading) {
         return (
@@ -134,7 +133,7 @@ function KioskNavLink({
     // Only block access if org EXISTS and is explicitly expired
     const orgBlocked = org
         ? !isOrgAccessible(org.subscription_status)
-        : false; // If org is null, don't block — let pages handle it
+        : false;
 
     async function handleSignOut() {
         await signOut();
@@ -164,7 +163,6 @@ function KioskNavLink({
                     <span className="text-2xl">🍽️</span>
                     <div className="min-w-0">
                         <p className="font-bold text-gray-900 text-sm truncate">
-                            {/* ✅ Null-safe — org can be null for staff */}
                             {org?.name || user.full_name || "Restaurant"}
                         </p>
                         <p className="text-xs text-gray-400 capitalize">
@@ -200,13 +198,12 @@ function KioskNavLink({
                         );
                     })}
 
-                     {/* Kiosk — dynamic href based on role */}
+                    {/* Kiosk — staff only, dynamic href */}
                     <KioskNavLink
                         role={role}
                         userId={user.id}
                         onNavigate={() => setSidebarOpen(false)}
                     />
-
                 </nav>
 
                 {/* User footer */}
