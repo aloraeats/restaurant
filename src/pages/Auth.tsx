@@ -187,7 +187,7 @@ export default function Auth() {
                         Restaurant Manager
                     </h1>
                     <p className="text-gray-500 mt-1 text-sm">
-                        Ghana's restaurant management platform 🇬🇭
+                         Restaurant management platform 
                     </p>
                 </div>
 

@@ -42,6 +42,14 @@ const NAV_ITEMS: NavItem[] = [
         icon: "👨‍🍳",
         roles: ["super_admin", "manager", "staff"],
     },
+
+    {
+        href: "/analytics",
+        label: "Analytics",
+        icon: "📊",
+        roles: ["super_admin", "manager"],
+    },
+
     
 ];
 

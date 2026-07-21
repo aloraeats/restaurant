@@ -16,6 +16,7 @@ export interface Organization {
     billing_cycle_start: string | null;
     next_invoice_date: string | null;
     created_at: string;
+    vat_rate: number;
 }
 
 export type SubscriptionStatus = "active" | "suspended" | "expired";
@@ -428,6 +429,40 @@ export interface Database {
                 Args: Record<string, never>;
                 Returns: string;
             };
+
+            get_revenue_analytics: {
+                Args: { p_org_id: string; p_branch_id?: string; p_start_date?: string; p_end_date?: string };
+                Returns: RevenueAnalyticsRow[];
+            };
+            get_top_products_analytics: {
+                Args: { p_org_id: string; p_branch_id?: string; p_start_date?: string; p_end_date?: string; p_limit?: number };
+                Returns: TopProductRow[];
+            };
+            get_order_type_analytics: {
+                Args: { p_org_id: string; p_branch_id?: string; p_start_date?: string; p_end_date?: string };
+                Returns: OrderTypeRow[];
+            };
         };
     };
 }
+
+export interface RevenueAnalyticsRow {
+    formatted_date: string;
+    order_count: number;
+    gross_revenue: number;
+    vat_amount: number;
+    net_revenue: number;
+}
+
+export interface TopProductRow {
+    product_name: string;
+    quantity_sold: number;
+    revenue_generated: number;
+}
+
+export interface OrderTypeRow {
+    resolved_type: "dine_in" | "kiosk" | "takeout" | "delivery";
+    order_count: number;
+    gross_revenue: number;
+}
+

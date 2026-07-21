@@ -1,13 +1,14 @@
 // ============================================================
 // Dashboard.tsx
 // v1: billing/subscription UI removed.
+// Added: VAT configuration card for super_admin
 // ============================================================
 
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { supabase } from "../lib/supabase";
-import { Spinner, Badge, EmptyState } from "../components/UI";
+import { Spinner, Badge, EmptyState, toast } from "../components/UI";
 import {
     formatCurrency,
     formatDateTime,
@@ -19,18 +20,29 @@ import type { Branch, Order, SetupStep } from "../lib/types";
 
 // ── StatCard ──────────────────────────────────────────────────
 function StatCard({
-    label, value, icon, sub,
+    label,
+    value,
+    icon,
+    sub,
+    highlight,
 }: {
     label: string;
     value: string | number;
     icon: string;
     sub?: string;
+    highlight?: boolean;
 }) {
     return (
-        <div className="card flex items-start gap-3 overflow-hidden">
+        <div className={`
+            card flex items-start gap-3 overflow-hidden
+            ${highlight ? "border-green-200 bg-green-50" : ""}
+        `}>
             <div className="text-2xl flex-shrink-0">{icon}</div>
             <div className="min-w-0 flex-1">
-                <p className="text-xl font-bold text-gray-900 break-words leading-tight">
+                <p className={`
+                    text-xl font-bold break-words leading-tight
+                    ${highlight ? "text-green-700" : "text-gray-900"}
+                `}>
                     {value}
                 </p>
                 <p className="text-sm text-gray-500 mt-0.5">{label}</p>
@@ -78,6 +90,140 @@ function ChecklistItem({ step }: { step: SetupStep }) {
     );
 }
 
+// ── VatSettingsCard ───────────────────────────────────────────
+function VatSettingsCard({
+    orgId,
+    currentRate,
+}: {
+    orgId: string;
+    currentRate: number;
+}) {
+    // Display as percentage (e.g. 0.185 → "18.5")
+    const [rate, setRate] = useState<string>(
+        currentRate > 0 ? (currentRate * 100).toFixed(1) : "0"
+    );
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
+
+    async function handleSave() {
+        const parsed = parseFloat(rate);
+
+        if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+            toast.error("VAT rate must be between 0% and 100%");
+            return;
+        }
+
+        setSaving(true);
+
+        const { error } = await supabase
+            .from("organizations")
+            .update({ vat_rate: parsed / 100 })
+            .eq("id", orgId);
+
+        if (error) {
+            toast.error("Failed to save VAT rate");
+        } else {
+            setSaved(true);
+            toast.success("VAT rate updated successfully");
+            setTimeout(() => setSaved(false), 3000);
+        }
+
+        setSaving(false);
+    }
+
+    const parsedRate = parseFloat(rate) || 0;
+    const exampleGross = 100;
+    const exampleVat = exampleGross * (parsedRate / 100) / (1 + parsedRate / 100);
+    const exampleNet = exampleGross - exampleVat;
+
+    return (
+        <div className="card">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-gray-900">
+                        🧾 VAT Configuration
+                    </h2>
+                    <p className="text-xs text-gray-400 mt-0.5 max-w-sm">
+                        Set to 0% if VAT does not apply or your prices exclude tax.
+                        Ghana standard rate is 18.5%.
+                    </p>
+                </div>
+
+                {/* Rate input + save */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="relative">
+                        <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={rate}
+                            onChange={(e) => {
+                                setSaved(false);
+                                setRate(e.target.value);
+                            }}
+                            className="w-24 border border-gray-200 rounded-lg px-3 py-2
+                                       text-sm focus:outline-none focus:ring-2
+                                       focus:ring-green-500 text-right pr-7"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2
+                                         text-gray-400 text-sm font-medium pointer-events-none">
+                            %
+                        </span>
+                    </div>
+                    <button
+                        onClick={handleSave}
+                        disabled={saving}
+                        className={`
+                            px-4 py-2 rounded-lg text-sm font-semibold
+                            transition-colors cursor-pointer disabled:opacity-50
+                            ${saved
+                                ? "bg-green-100 text-green-700"
+                                : "bg-green-600 text-white hover:bg-green-700"
+                            }
+                        `}
+                    >
+                        {saving ? "Saving..." : saved ? "✓ Saved" : "Save"}
+                    </button>
+                </div>
+            </div>
+
+            {/* Live example calculation */}
+            {parsedRate > 0 && (
+                <div className="mt-3 bg-gray-50 rounded-xl p-3 text-xs text-gray-500 space-y-1">
+                    <p className="font-medium text-gray-600 mb-1">
+                        Example (VAT-inclusive pricing):
+                    </p>
+                    <div className="flex justify-between">
+                        <span>Order total (gross)</span>
+                        <span className="font-semibold text-gray-700">
+                            {formatCurrency(exampleGross)}
+                        </span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span>VAT component ({parsedRate.toFixed(1)}%)</span>
+                        <span className="font-semibold text-gray-700">
+                            {formatCurrency(exampleVat)}
+                        </span>
+                    </div>
+                    <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
+                        <span>Net revenue</span>
+                        <span className="font-bold text-green-700">
+                            {formatCurrency(exampleNet)}
+                        </span>
+                    </div>
+                </div>
+            )}
+
+            {parsedRate === 0 && (
+                <div className="mt-3 bg-gray-50 rounded-xl p-3 text-xs text-gray-400">
+                    VAT is currently disabled. Revenue stats show full gross amounts.
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────
 export default function Dashboard() {
     const { user, org } = useAuth();
@@ -88,26 +234,26 @@ export default function Dashboard() {
         totalOrders: 0,
         todayOrders: 0,
         todayRevenue: 0,
+        todayVat: 0,
+        todayNet: 0,
         pendingOrders: 0,
     });
-    
+
     const [loading, setLoading] = useState(true);
     const [userBranchRole, setUserBranchRole] = useState<string | null>(null);
     const [branchRoleLoaded, setBranchRoleLoaded] = useState(false);
 
-    // Resolve branch role first, then load dashboard data.
+    // ── Resolve branch role first ─────────────────────────────
     // For non-staff roles, skip the branch_staff query entirely
     // and mark as loaded immediately so dashboard doesn't wait.
     useEffect(() => {
         if (!user) return;
 
         if (user.role !== "staff") {
-            // super_admin and manager — no branch role needed
             setBranchRoleLoaded(true);
             return;
         }
 
-        // staff — fetch branch role before loading dashboard
         supabase
             .from("branch_staff")
             .select("role")
@@ -120,25 +266,30 @@ export default function Dashboard() {
             });
     }, [user?.id]);
 
-    // Only runs after branch role is resolved —
-    // query is always correct on first load, no null gap
+    // ── Load dashboard data after role is confirmed ───────────
     useEffect(() => {
         if (branchRoleLoaded) {
             loadDashboardData();
         }
     }, [branchRoleLoaded]);
 
+    // ── Price visibility ──────────────────────────────────────
     const showPrices: boolean =
         user?.role === "super_admin" ||
         user?.role === "manager" ||
         userBranchRole === "branch_manager";
 
+    const vatRate = org?.vat_rate ?? 0;
+    const vatEnabled = vatRate > 0;
+
+    // ── Load all dashboard data ───────────────────────────────
     async function loadDashboardData() {
         setLoading(true);
 
         try {
             let branchData: Branch[] = [];
 
+            // Fetch branches — org-wide for admin/manager, assigned for staff
             if (org?.id) {
                 const { data, error } = await supabase
                     .from("branches")
@@ -172,7 +323,7 @@ export default function Dashboard() {
             if (branchData.length > 0) {
                 const branchIds = branchData.map((b) => b.id);
 
-                // Restricted roles don't get total_amount from the server
+                // Restricted roles never receive price columns from server
                 const isRestricted =
                     user?.role === "staff" && userBranchRole !== "branch_manager";
 
@@ -195,18 +346,33 @@ export default function Dashboard() {
 
                     const today = new Date().toISOString().split("T")[0];
                     const todayOrders = orders.filter(
-                        (o) => o.created_at.startsWith(today) && o.status !== "cancelled"
+                        (o) =>
+                            o.created_at.startsWith(today) &&
+                            o.status !== "cancelled"
                     );
+
+                    const todayRevenue = todayOrders.reduce(
+                        (s, o) => s + (o.total_amount || 0),
+                        0
+                    );
+
+                    // Back-out VAT from gross revenue (tax-inclusive formula)
+                    const todayVat = vatEnabled
+                        ? todayRevenue * (vatRate / (1 + vatRate))
+                        : 0;
+
+                    const todayNet = todayRevenue - todayVat;
 
                     setStats({
                         totalOrders: orders.length,
                         todayOrders: todayOrders.length,
-                        todayRevenue: todayOrders.reduce((s, o) => s + o.total_amount, 0),
+                        todayRevenue,
+                        todayVat,
+                        todayNet,
                         pendingOrders: orders.filter((o) => o.status === "pending").length,
                     });
                 }
             }
-
         } catch (err) {
             if (import.meta.env.DEV) console.error("Dashboard load error:", err);
         } finally {
@@ -215,7 +381,6 @@ export default function Dashboard() {
     }
 
     // ── Setup checklist (super_admin only) ────────────────────
-    // v1: subscribe step removed
     const setupSteps: SetupStep[] = [
         {
             id: "branch",
@@ -250,6 +415,7 @@ export default function Dashboard() {
     const completedSteps = setupSteps.filter((s) => s.completed).length;
     const allDone = completedSteps === setupSteps.length;
 
+    // ── Loading ───────────────────────────────────────────────
     if (loading) {
         return (
             <div className="page-container flex items-center justify-center min-h-64">
@@ -288,21 +454,56 @@ export default function Dashboard() {
                     label="Orders today"
                     value={stats.todayOrders}
                 />
-                
                 <StatCard
                     icon="💰"
                     label="Revenue today"
                     value={showPrices ? formatCurrency(stats.todayRevenue) : "—"}
+                    highlight={showPrices}
+                    sub={
+                        showPrices && vatEnabled
+                            ? `Net: ${formatCurrency(stats.todayNet)}`
+                            : undefined
+                    }
                 />
-
                 <StatCard
                     icon="⏳"
                     label="Pending orders"
                     value={stats.pendingOrders}
                     sub="Awaiting kitchen"
                 />
-                
             </div>
+
+            {/* ── VAT breakdown row (privileged roles + VAT enabled) ── */}
+            {showPrices && vatEnabled && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <StatCard
+                        icon="📊"
+                        label="Gross revenue today"
+                        value={formatCurrency(stats.todayRevenue)}
+                    />
+                    <StatCard
+                        icon="🧾"
+                        label={`VAT (${(vatRate * 100).toFixed(1)}% incl.)`}
+                        value={formatCurrency(stats.todayVat)}
+                        sub="Backed out of gross"
+                    />
+                    <StatCard
+                        icon="✅"
+                        label="Net revenue today"
+                        value={formatCurrency(stats.todayNet)}
+                        highlight
+                        sub="After VAT"
+                    />
+                </div>
+            )}
+
+            {/* ── VAT configuration (super_admin only) ──────── */}
+            {user?.role === "super_admin" && org && (
+                <VatSettingsCard
+                    orgId={org.id}
+                    currentRate={org.vat_rate ?? 0}
+                />
+            )}
 
             {/* ── Setup checklist (super_admin, not done) ───── */}
             {user?.role === "super_admin" && !allDone && (
@@ -436,6 +637,32 @@ export default function Dashboard() {
                     </div>
                 )}
             </div>
+
+            {/* ── Analytics shortcut (super_admin + manager) ── */}
+            {(user?.role === "super_admin" || user?.role === "manager") && (
+                <div className="card bg-gradient-to-r from-green-50 to-emerald-50
+                                border-green-100">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <h2 className="text-base font-semibold text-gray-900">
+                                📊 Analytics
+                            </h2>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                                View revenue trends, top products, and order breakdowns
+                            </p>
+                        </div>
+                        <Link
+                            to="/analytics"
+                            className="flex-shrink-0 px-4 py-2 bg-green-600 text-white
+                                       text-sm font-semibold rounded-lg hover:bg-green-700
+                                       transition-colors"
+                        >
+                            Open →
+                        </Link>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }

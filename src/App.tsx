@@ -10,6 +10,7 @@ import Branches from "./pages/Branches";
 import BranchDetail from "./pages/BranchDetail";
 import Kitchen from "./pages/Kitchen";
 import Customer from "./pages/Customer";
+import Analytics from "./pages/Analytics";
 
 const basename = "/";
 
@@ -112,6 +113,15 @@ export default function App() {
                     element={
                         <ProtectedRoute>
                             <Layout><Kitchen /></Layout>
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/analytics"
+                    element={
+                        <ProtectedRoute>
+                            <Layout><Analytics /></Layout>
                         </ProtectedRoute>
                     }
                 />

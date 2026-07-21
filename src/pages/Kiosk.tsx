@@ -28,8 +28,6 @@ import type {
 } from "../lib/types";
 
 // ── Pickup code generator ──────────────────────────────────────
-// Format: two uppercase letters + one or two digit number
-// e.g. AB7, KD23, MX14, PQ3
 function generatePickupCode(): string {
     const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I or O (confusing)
     const a = letters[Math.floor(Math.random() * letters.length)];
@@ -38,8 +36,6 @@ function generatePickupCode(): string {
     return `${a}${b}${n}`;
 }
 
-// ── Kiosk menu data shape ──────────────────────────────────────
-// Lighter than MenuData — no table info needed
 interface KioskMenuData {
     restaurant: { id: string; name: string };
     branch: { id: string; name: string; address: string | null };
@@ -47,7 +43,6 @@ interface KioskMenuData {
 }
 
 // ── Product card ───────────────────────────────────────────────
-// Identical to Customer.tsx ProductCard
 function ProductCard({
     product,
     quantity,
@@ -101,7 +96,7 @@ function ProductCard({
                         onClick={() => onAdd(product)}
                         className="ml-auto text-xs bg-green-600 text-white px-3 py-1.5
                        rounded-lg font-medium hover:bg-green-700 transition-colors
-                       active:scale-95"
+                       active:scale-95 cursor-pointer"
                     >
                         + Add
                     </button>
@@ -112,16 +107,19 @@ function ProductCard({
 }
 
 // ── Cart view ──────────────────────────────────────────────────
-// Same as Customer.tsx CartView except footer text uses pickup code
 function CartView({
     cart,
     pickupCode,
+    locationType,
+    setLocationType,
     onBack,
     onOrder,
     ordering,
 }: {
     cart: ReturnType<typeof useCart>;
     pickupCode: string;
+    locationType: "takeout" | "dine_in";
+    setLocationType: (type: "takeout" | "dine_in") => void;
     onBack: () => void;
     onOrder: (notes: string) => void;
     ordering: boolean;
@@ -135,7 +133,7 @@ function CartView({
                       flex items-center gap-3 px-4 py-4 z-10">
                 <button
                     onClick={onBack}
-                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
                 >
                     ←
                 </button>
@@ -145,8 +143,41 @@ function CartView({
                 </span>
             </div>
 
+            {/* Dining preference */}
+            <div className="px-4 py-3.5 bg-gray-50 border-b border-gray-100">
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-2">
+                    Dining preference
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                    {(["takeout", "dine_in"] as const).map((type) => {
+                        const isSelected = locationType === type;
+                        const labels = {
+                            takeout: { label: "Pack as Takeout", icon: "🛍️" },
+                            dine_in: { label: "Eat on Table", icon: "🍽️" },
+                        };
+                        return (
+                            <button
+                                key={type}
+                                type="button"
+                                onClick={() => setLocationType(type)}
+                                className={`
+                                    flex items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer
+                                    ${isSelected
+                                        ? "border-green-600 bg-green-50 text-green-700 font-semibold"
+                                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                                    }
+                                `}
+                            >
+                                <span className="text-lg">{labels[type].icon}</span>
+                                <span className="text-sm">{labels[type].label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
             {/* Cart items */}
-            <div className="flex-1 px-4 py-4 space-y-3">
+            <div className="flex-1 px-4 py-4 space-y-3 overflow-y-auto">
                 {cart.items.map((item) => (
                     <div
                         key={item.product_id}
@@ -197,7 +228,7 @@ function CartView({
                                 className="w-7 h-7 rounded-full border border-gray-300
                            flex items-center justify-center text-gray-600
                            hover:bg-gray-100 transition-colors font-bold
-                           text-lg leading-none"
+                           text-lg leading-none cursor-pointer"
                             >
                                 −
                             </button>
@@ -211,7 +242,7 @@ function CartView({
                                 className="w-7 h-7 rounded-full border border-gray-300
                            flex items-center justify-center text-gray-600
                            hover:bg-gray-100 transition-colors font-bold
-                           text-lg leading-none"
+                           text-lg leading-none cursor-pointer"
                             >
                                 +
                             </button>
@@ -258,7 +289,6 @@ function CartView({
                 >
                     Place Order 🛎️
                 </Button>
-                {/* Pickup code shown in cart footer so customer knows it early */}
                 <p className="text-xs text-center text-gray-400 mt-2">
                     Your pickup number is{" "}
                     <span className="font-bold text-green-700">{pickupCode}</span>
@@ -270,7 +300,6 @@ function CartView({
 }
 
 // ── Confirmation view ──────────────────────────────────────────
-// Pickup code is the hero — shown large and bold
 function ConfirmationView({
     pickupCode,
     total,
@@ -341,7 +370,6 @@ function ConfirmationView({
 export default function Kiosk() {
     const { branchId } = useParams<{ branchId: string }>();
 
-    // Use branchId as the cart key — one cart per kiosk screen
     const cart = useCart(branchId || "");
     const sessionId = getOrCreateSessionId();
 
@@ -352,13 +380,15 @@ export default function Kiosk() {
     const [ordering, setOrdering] = useState(false);
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
     const [pickupCode, setPickupCode] = useState<string>(generatePickupCode);
+    
+    // Kiosk Location picker state
+    const [locationType, setLocationType] = useState<"takeout" | "dine_in">("takeout");
 
     const [placedOrder, setPlacedOrder] = useState<{
         total: number;
     } | null>(null);
 
     // ── Load menu ────────────────────────────────────────────────
-    // Option B: direct queries, no RPC needed
     const loadMenu = useCallback(async () => {
         if (!branchId) {
             setError("Invalid kiosk link. Please ask staff for assistance.");
@@ -389,7 +419,7 @@ export default function Kiosk() {
                 return;
             }
 
-            // 2. Fetch org — check subscription status
+            // 2. Fetch org
             const { data: org, error: orgError } = await supabase
                 .from("organizations")
                 .select("id, name, subscription_status")
@@ -408,7 +438,7 @@ export default function Kiosk() {
                 return;
             }
 
-            // 3. Fetch categories for this org
+            // 3. Fetch categories
             const { data: categories, error: catError } = await supabase
                 .from("categories")
                 .select("id, name, sort_order")
@@ -421,7 +451,7 @@ export default function Kiosk() {
                 return;
             }
 
-            // 4. Fetch available products for this branch via branch_inventory
+            // 4. Fetch inventory products
             const { data: inventory, error: invError } = await supabase
                 .from("branch_inventory")
                 .select(`
@@ -441,8 +471,6 @@ export default function Kiosk() {
             }
 
             // 5. Build categories with products
-            // Price resolution: override_price ?? base_price
-            // Products sorted alphabetically within each category
             const categoryMap = new Map(
                 categories.map((c) => [
                     c.id,
@@ -514,18 +542,15 @@ export default function Kiosk() {
 
         setOrdering(true);
 
-        // Embed pickup code in notes — kitchen parses [KIOSK:AB7]
-        // Customer notes appended after the tag if present
+        // Prep the explicit metadata location tag
+        const locationTag = `[TYPE:${locationType.toUpperCase()}]`;
+
+        // Prepend both kiosk code and location tag
         const customerNotes = notes ? sanitizeInput(notes) : "";
         const orderNotes = customerNotes
-            ? `[KIOSK:${pickupCode}] ${customerNotes}`
-            : `[KIOSK:${pickupCode}]`;
+            ? `[KIOSK:${pickupCode}] ${locationTag} ${customerNotes}`
+            : `[KIOSK:${pickupCode}] ${locationTag}`;
 
-        // Kiosk orders have no table — we need a valid table_id for the
-        // place-order edge function. We pass null and let the edge
-        // function handle kiosk orders without a table.
-        // NOTE: if place-order requires table_id, a dedicated
-        // "kiosk table" per branch can be created as a workaround.
         const payload = {
             branch_id: menuData.branch.id,
             session_id: sessionId,
@@ -636,6 +661,8 @@ export default function Kiosk() {
             <CartView
                 cart={cart}
                 pickupCode={pickupCode}
+                locationType={locationType}
+                setLocationType={setLocationType}
                 onBack={() => setView("menu")}
                 onOrder={handlePlaceOrder}
                 ordering={ordering}
@@ -655,8 +682,7 @@ export default function Kiosk() {
                 <h1 className="text-2xl font-bold">{menuData.restaurant.name}</h1>
                 <p className="text-green-200 text-sm mt-0.5">{menuData.branch.name}</p>
                 <div className="flex items-center gap-2 mt-2">
-                    {/* Pickup code shown in header so customer sees it early */}
-                    <span className="text-xs bg-green-600 px-2.5 py-1 rounded-full">
+                    <span className="text-xs bg-green-600 px-2.5 py-1 rounded-full font-semibold">
                         🎫 Pickup: {pickupCode}
                     </span>
                     {menuData.branch.address && (
@@ -676,7 +702,7 @@ export default function Kiosk() {
                             onClick={() => setActiveCategory(cat.id)}
                             className={`
                                 flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium
-                                transition-colors whitespace-nowrap
+                                transition-colors whitespace-nowrap cursor-pointer
                                 ${activeCategory === cat.id
                                     ? "bg-green-600 text-white"
                                     : "bg-gray-100 text-gray-600 hover:bg-gray-200"
@@ -705,7 +731,6 @@ export default function Kiosk() {
                         <h2 className="text-lg font-bold text-gray-900 mt-4 mb-2">
                             {activeMenuCategory.name}
                         </h2>
-                        {/* Already sorted alphabetically during menu build */}
                         {activeMenuCategory.products.map((product: MenuProduct) => {
                             const cartItem = cart.items.find(
                                 (i) => i.product_id === product.id
@@ -730,7 +755,7 @@ export default function Kiosk() {
             {/* ── Floating cart button ──────────────────── */}
             {!cart.isEmpty && (
                 <div className="fixed bottom-0 left-0 right-0 p-4 bg-white
-                        border-t border-gray-100 shadow-lg">
+                        border-t border-gray-100 shadow-lg z-20">
                     <Button
                         fullWidth
                         size="lg"

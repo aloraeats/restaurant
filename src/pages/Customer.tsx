@@ -94,12 +94,16 @@ function ProductCard({
 function CartView({
     cart,
     menuData,
+    locationType,
+    setLocationType,
     onBack,
     onOrder,
     ordering,
 }: {
     cart: ReturnType<typeof useCart>;
     menuData: MenuData;
+    locationType: "dine_in" | "takeout" | "delivery";
+    setLocationType: (type: "dine_in" | "takeout" | "delivery") => void;
     onBack: () => void;
     onOrder: (notes: string) => void;
     ordering: boolean;
@@ -113,7 +117,7 @@ function CartView({
                       flex items-center gap-3 px-4 py-4 z-10">
                 <button
                     onClick={onBack}
-                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
                 >
                     ←
                 </button>
@@ -123,8 +127,42 @@ function CartView({
                 </span>
             </div>
 
+            {/* Location Selector */}
+            <div className="px-4 py-3.5 bg-gray-50 border-b border-gray-100">
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-2">
+                    Dining preference
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                    {(["dine_in", "takeout", "delivery"] as const).map((type) => {
+                        const isSelected = locationType === type;
+                        const labels = {
+                            dine_in: { label: "Eat In", icon: "🍽️" },
+                            takeout: { label: "Takeout", icon: "🛍️" },
+                            delivery: { label: "Delivery", icon: "🛵" },
+                        };
+                        return (
+                            <button
+                                key={type}
+                                type="button"
+                                onClick={() => setLocationType(type)}
+                                className={`
+                                    flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all cursor-pointer
+                                    ${isSelected
+                                        ? "border-green-600 bg-green-50 text-green-700 font-semibold"
+                                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                                    }
+                                `}
+                            >
+                                <span className="text-lg mb-1">{labels[type].icon}</span>
+                                <span className="text-xs">{labels[type].label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
             {/* Cart items */}
-            <div className="flex-1 px-4 py-4 space-y-3">
+            <div className="flex-1 px-4 py-4 space-y-3 overflow-y-auto">
                 {cart.items.map((item) => (
                     <div
                         key={item.product_id}
@@ -176,7 +214,7 @@ function CartView({
                                 className="w-7 h-7 rounded-full border border-gray-300 flex
                            items-center justify-center text-gray-600
                            hover:bg-gray-100 transition-colors font-bold text-lg
-                           leading-none"
+                           leading-none cursor-pointer"
                             >
                                 −
                             </button>
@@ -188,7 +226,7 @@ function CartView({
                                 className="w-7 h-7 rounded-full border border-gray-300 flex
                            items-center justify-center text-gray-600
                            hover:bg-gray-100 transition-colors font-bold text-lg
-                           leading-none"
+                           leading-none cursor-pointer"
                             >
                                 +
                             </button>
@@ -320,6 +358,9 @@ export default function Customer() {
     const [view, setView] = useState<CustomerView>("menu");
     const [ordering, setOrdering] = useState(false);
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
+    
+    // Dynamic Location picker state
+    const [locationType, setLocationType] = useState<"dine_in" | "takeout" | "delivery">("dine_in");
 
     // Placed order info for confirmation screen
     const [placedOrder, setPlacedOrder] = useState<{
@@ -386,6 +427,10 @@ export default function Customer() {
 
         setOrdering(true);
 
+        // Prepend the active selected location metadata tag
+        const locationTag = `[TYPE:${locationType.toUpperCase()}]`;
+        const finalNotes = notes ? `${locationTag} ${notes}` : locationTag;
+
         const payload = {
             qr_identifier: qrId,
             session_id: sessionId,
@@ -396,12 +441,10 @@ export default function Customer() {
                     ? sanitizeInput(item.notes || "")
                     : undefined,
             })),
-            notes: notes || undefined,
+            notes: finalNotes,
         };
 
         try {
-            // Call place-order edge function directly
-            // (using fetch because it's anon — no JWT needed)
             const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
             const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
@@ -493,6 +536,8 @@ export default function Customer() {
             <CartView
                 cart={cart}
                 menuData={menuData}
+                locationType={locationType}
+                setLocationType={setLocationType}
                 onBack={() => setView("menu")}
                 onOrder={handlePlaceOrder}
                 ordering={ordering}
@@ -512,7 +557,7 @@ export default function Customer() {
                 <h1 className="text-2xl font-bold">{menuData.restaurant.name}</h1>
                 <p className="text-green-200 text-sm mt-0.5">{menuData.branch.name}</p>
                 <div className="flex items-center gap-2 mt-2">
-                    <span className="text-xs bg-green-600 px-2.5 py-1 rounded-full">
+                    <span className="text-xs bg-green-600 px-2.5 py-1 rounded-full font-semibold">
                         📍 {menuData.table.name}
                     </span>
                     {menuData.branch.address && (
@@ -532,7 +577,7 @@ export default function Customer() {
                             onClick={() => setActiveCategory(cat.id)}
                             className={`
                 flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium
-                transition-colors whitespace-nowrap
+                transition-colors whitespace-nowrap cursor-pointer
                 ${activeCategory === cat.id
                                     ? "bg-green-600 text-white"
                                     : "bg-gray-100 text-gray-600 hover:bg-gray-200"
@@ -588,7 +633,7 @@ export default function Customer() {
             {/* ── Floating cart button ──────────────────── */}
             {!cart.isEmpty && (
                 <div className="fixed bottom-0 left-0 right-0 p-4 bg-white
-                        border-t border-gray-100 shadow-lg">
+                        border-t border-gray-100 shadow-lg z-20">
                     <Button
                         fullWidth
                         size="lg"

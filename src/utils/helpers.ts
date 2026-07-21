@@ -305,3 +305,45 @@ export function isLoginLocked(): { locked: boolean; remainingMs: number } {
     }
     return { locked: false, remainingMs: 0 };
 }
+
+/**
+ * Parses order location types directly from notes field
+ * Falls back to core order_type if metadata tag is missing
+ */
+export function parseOrderTypeFromNotes(
+    notes: string | null,
+    fallbackType: "dine_in" | "kiosk"
+): "dine_in" | "kiosk" | "takeout" | "delivery" {
+    if (!notes) return fallbackType;
+    if (notes.includes("[TYPE:DELIVERY]")) return "delivery";
+    if (notes.includes("[TYPE:TAKEOUT]")) return "takeout";
+    if (notes.includes("[TYPE:DINE_IN]")) return "dine_in";
+    return fallbackType;
+}
+
+/**
+ * Clean up order notes to display plain customer instructions 
+ * Strips both KIOSK and LOCATION TYPE tags cleanly
+ */
+export function stripMetadataFromNotes(notes: string | null): string {
+    if (!notes) return "";
+    return notes
+        .replace(/\[KIOSK:[A-Z]{2}\d{1,2}\]/g, "")
+        .replace(/\[TYPE:(DINE_IN|TAKEOUT|DELIVERY)\]/g, "")
+        .trim();
+}
+
+/**
+ * Returns consistent UI styling and iconography configurations for location types
+ */
+export function getLocationBadgeDetails(
+    type: "dine_in" | "kiosk" | "takeout" | "delivery"
+) {
+    const maps = {
+        dine_in: { icon: "🍽️", label: "Dine-in", style: "bg-purple-100 text-purple-800" },
+        kiosk: { icon: "🖥️", label: "Kiosk", style: "bg-blue-100 text-blue-800" },
+        takeout: { icon: "🛍️", label: "Takeout", style: "bg-amber-100 text-amber-800" },
+        delivery: { icon: "🛵", label: "Delivery", style: "bg-pink-100 text-pink-800" },
+    };
+    return maps[type] || maps.dine_in;
+}
