@@ -87,7 +87,7 @@ export interface BranchStaff {
     created_at: string;
 }
 
-export type BranchRole = "kitchen" | "waiter" | "branch_manager";
+export type BranchRole = "kitchen" | "waiter" | "branch_manager" | "cashier";
 
 export interface Category {
     id: string;
@@ -140,7 +140,7 @@ export interface Order {
     updated_at: string;
 }
 
-export type OrderStatus = "pending" | "preparing" | "served" | "cancelled";
+export type OrderStatus = "preparing" | "served" | "cancelled";
 
 export interface OrderItem {
     id: string;
@@ -439,9 +439,13 @@ export interface Database {
                 Returns: TopProductRow[];
             };
             get_order_type_analytics: {
-                Args: { p_org_id: string; p_branch_id?: string; p_start_date?: string; p_end_date?: string };
-                Returns: OrderTypeRow[];
-            };
+                            Args: { p_org_id: string; p_branch_id?: string; p_start_date?: string; p_end_date?: string };
+                            Returns: OrderTypeRow[];
+                        };
+                        update_org_vat_rate: {
+                            Args: { p_org_id: string; p_vat_rate: number };
+                            Returns: void;
+                        };
         };
     };
 }

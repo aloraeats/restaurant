@@ -34,12 +34,22 @@ export default function Branches() {
 
     async function loadBranches() {
         setLoading(true);
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from("branches")
             .select("*")
             .eq("org_id", org!.id)
             .is("deleted_at", null)
             .order("created_at");
+
+        if (error) {
+            console.error("[Branches] loadBranches error:", {
+                code: error.code,
+                message: error.message,
+                details: error.details,
+                hint: error.hint,
+            });
+            toast.error("Failed to load branches: " + error.message);
+        }
 
         setBranches((data as Branch[]) || []);
         setLoading(false);

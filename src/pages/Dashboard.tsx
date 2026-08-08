@@ -7,8 +7,8 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-import { supabase } from "../lib/supabase";
-import { Spinner, Badge, EmptyState, toast } from "../components/UI";
+import { supabase, callFunction } from "../lib/supabase";
+import { Spinner, Badge, EmptyState, Button, Input, Modal, toast } from "../components/UI";
 import {
     formatCurrency,
     formatDateTime,
@@ -16,7 +16,15 @@ import {
     orderStatusLabel,
     timeAgo,
 } from "../utils/helpers";
-import type { Branch, Order, SetupStep } from "../lib/types";
+import PrintReceipt from "../components/PrintReceipt";
+import A4Invoice from "../components/A4Invoice";
+import type { Branch, Order, OrderItem, Product, RestaurantTable, SetupStep, Profile, CreateStaffResponse } from "../lib/types";
+
+// ── Types ──────────────────────────────────────────────────────
+type OrderWithDetails = Order & {
+    order_items: (OrderItem & { products: Product })[];
+    restaurant_tables: RestaurantTable | null;
+};
 
 // ── StatCard ──────────────────────────────────────────────────
 function StatCard({
@@ -94,9 +102,11 @@ function ChecklistItem({ step }: { step: SetupStep }) {
 function VatSettingsCard({
     orgId,
     currentRate,
+    onSaved,
 }: {
     orgId: string;
     currentRate: number;
+    onSaved: (rate: number) => void;
 }) {
     // Display as percentage (e.g. 0.185 → "18.5")
     const [rate, setRate] = useState<string>(
@@ -105,31 +115,95 @@ function VatSettingsCard({
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
 
+    // Sync local input when currentRate changes (e.g. after org refresh)
+    useEffect(() => {
+        setRate(currentRate > 0 ? (currentRate * 100).toFixed(1) : "0");
+    }, [currentRate]);
+
     async function handleSave() {
-        const parsed = parseFloat(rate);
+            const parsed = parseFloat(rate);
 
-        if (isNaN(parsed) || parsed < 0 || parsed > 100) {
-            toast.error("VAT rate must be between 0% and 100%");
-            return;
-        }
+            if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+                toast.error("VAT rate must be between 0% and 100%");
+                return;
+            }
 
-        setSaving(true);
+            setSaving(true);
 
-        const { error } = await supabase
-            .from("organizations")
-            .update({ vat_rate: parsed / 100 })
-            .eq("id", orgId);
+            const savedRate = parsed / 100;
 
-        if (error) {
-            toast.error("Failed to save VAT rate");
-        } else {
+            // Try the RPC (SECURITY DEFINER, bypasses RLS) first.
+            // If the function doesn't exist yet on the DB, fall back to direct update.
+            const { error: rpcError } = await supabase.rpc(
+                "update_org_vat_rate",
+                { p_org_id: orgId, p_vat_rate: savedRate }
+            );
+
+            if (rpcError) {
+                // RPC not found — fall back to direct table update
+                if (
+                    rpcError.message?.includes("Could not find the function") ||
+                    rpcError.message?.includes("function") ||
+                    rpcError.code === "PGRST202"
+                ) {
+                    const { error: updateError } = await supabase
+                        .from("organizations")
+                        .update({ vat_rate: savedRate })
+                        .eq("id", orgId);
+
+                    if (updateError) {
+                        console.error("VAT save error:", updateError);
+                        toast.error(
+                            `Failed to save VAT rate: ${updateError.message}`
+                        );
+                        setSaving(false);
+                        return;
+                    }
+                } else {
+                    console.error("VAT RPC error:", rpcError);
+                    toast.error(
+                        `Failed to save VAT rate: ${rpcError.message || JSON.stringify(rpcError)}`
+                    );
+                    setSaving(false);
+                    return;
+                }
+            }
+
+            // Always verify the save by re-fetching
+            const { data: refreshedOrg } = await supabase
+                .from("organizations")
+                .select("vat_rate")
+                .eq("id", orgId)
+                .single();
+
+            const dbConfirmedRate = refreshedOrg?.vat_rate ?? 0;
+
+            if (Math.abs(dbConfirmedRate - savedRate) > 0.0001) {
+                // The DB value doesn't match what we tried to save.
+                // Most likely RLS silently rejected the direct update.
+                console.error(
+                    "VAT save mismatch — DB has",
+                    dbConfirmedRate,
+                    "but we tried to save",
+                    savedRate
+                );
+                toast.error(
+                    "VAT rate could not be saved. The database may have restrictive security policies. " +
+                    "Please run the SQL fix in supabase/migrations/fix_vat_update.sql"
+                );
+                setSaving(false);
+                return;
+            }
+
+            console.log("VAT saved:", savedRate, "DB confirmed:", dbConfirmedRate);
+
             setSaved(true);
             toast.success("VAT rate updated successfully");
+            onSaved(savedRate);
             setTimeout(() => setSaved(false), 3000);
-        }
 
-        setSaving(false);
-    }
+            setSaving(false);
+        }
 
     const parsedRate = parseFloat(rate) || 0;
     const exampleGross = 100;
@@ -224,9 +298,176 @@ function VatSettingsCard({
     );
 }
 
+// ── ManagersCard ─────────────────────────────────────────────
+function ManagersCard({ orgId }: { orgId: string }) {
+    const [managers, setManagers] = useState<Profile[]>([]);
+    const [loadingManagers, setLoadingManagers] = useState(true);
+    const [modalOpen, setModalOpen] = useState(false);
+    const [form, setForm] = useState({ full_name: "", email: "", password: "" });
+    const [errors, setErrors] = useState<Record<string, string>>({});
+    const [creating, setCreating] = useState(false);
+
+    async function loadManagers() {
+        setLoadingManagers(true);
+        const { data, error } = await supabase
+            .from("profiles")
+            .select("id, email, full_name, created_at")
+            .eq("org_id", orgId)
+            .eq("role", "manager")
+            .order("created_at");
+
+        if (error) console.warn("Managers fetch error:", error.message);
+        setManagers((data as Profile[]) || []);
+        setLoadingManagers(false);
+    }
+
+    useEffect(() => { loadManagers(); }, [orgId]);
+
+    async function handleCreate() {
+        const full_name = form.full_name.trim();
+        const email = form.email.trim();
+        const password = form.password;
+
+        const errs: Record<string, string> = {};
+        if (!full_name) errs.full_name = "Full name is required";
+        if (!email) errs.email = "Email is required";
+        if (!password || password.length < 6) errs.password = "Min 6 characters";
+        if (Object.keys(errs).length) { setErrors(errs); return; }
+
+        setErrors({});
+        setCreating(true);
+
+        try {
+            // role: "manager" + no branch_id → org-level general manager.
+            // Backend already supports this path (create-staff edge function).
+            const { data, error } = await callFunction<CreateStaffResponse>(
+                "create-staff",
+                { email, password, full_name, role: "manager" }
+            );
+
+            if (error) { toast.error(error); return; }
+            if (!data) { toast.error("Something went wrong — please try again"); return; }
+
+            toast.success(`${full_name} added as General Manager! 🎉`);
+            setModalOpen(false);
+            setForm({ full_name: "", email: "", password: "" });
+            await loadManagers();
+        } catch (err) {
+            console.error("handleCreateManager:", err);
+            toast.error("An unexpected error occurred");
+        } finally {
+            setCreating(false);
+        }
+    }
+
+    return (
+        <div className="card">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-gray-900">
+                        👥 General Managers
+                    </h2>
+                    <p className="text-xs text-gray-400 mt-0.5 max-w-sm">
+                        Org-level managers who can run your whole organization.
+                    </p>
+                </div>
+                <Button size="sm" onClick={() => setModalOpen(true)}>
+                    + Add Manager
+                </Button>
+            </div>
+
+            <div className="mt-3">
+                {loadingManagers ? (
+                    <Spinner size="sm" />
+                ) : managers.length === 0 ? (
+                    <p className="text-sm text-gray-400 py-2">No managers yet.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {managers.map((m) => (
+                            <div key={m.id}
+                                className="flex items-center gap-3 py-2 border-b
+                                           border-gray-50 last:border-0">
+                                <div className="w-8 h-8 rounded-full bg-purple-100 flex
+                                               items-center justify-center text-purple-700
+                                               text-sm font-bold flex-shrink-0">
+                                    {m.full_name?.charAt(0).toUpperCase() || "?"}
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                        {m.full_name || "Unknown"}
+                                    </p>
+                                    <p className="text-xs text-gray-400 truncate">{m.email}</p>
+                                </div>
+                                <Badge className="bg-purple-100 text-purple-700 ml-auto">
+                                    Manager
+                                </Badge>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* ── Add Manager Modal ─────────────────────────── */}
+            <Modal
+                open={modalOpen}
+                onClose={() => setModalOpen(false)}
+                title="Add General Manager"
+                size="sm"
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={() => setModalOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleCreate} loading={creating}>
+                            Create Manager
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4">
+                    <Input
+                        label="Full Name"
+                        placeholder="Kwame Darko"
+                        value={form.full_name}
+                        onChange={(e) =>
+                            setForm((p) => ({ ...p, full_name: e.target.value }))
+                        }
+                        error={errors.full_name}
+                        required
+                        autoFocus
+                    />
+                    <Input
+                        label="Email"
+                        type="email"
+                        placeholder="manager@restaurant.com"
+                        value={form.email}
+                        onChange={(e) =>
+                            setForm((p) => ({ ...p, email: e.target.value }))
+                        }
+                        error={errors.email}
+                        required
+                    />
+                    <Input
+                        label="Temporary Password"
+                        type="password"
+                        placeholder="Min 6 characters"
+                        value={form.password}
+                        onChange={(e) =>
+                            setForm((p) => ({ ...p, password: e.target.value }))
+                        }
+                        error={errors.password}
+                        hint="They can change this after first login"
+                        required
+                    />
+                </div>
+            </Modal>
+        </div>
+    );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────
 export default function Dashboard() {
-    const { user, org } = useAuth();
+    const { user, org, refreshOrg } = useAuth();
 
     const [branches, setBranches] = useState<Branch[]>([]);
     const [recentOrders, setRecentOrders] = useState<Order[]>([]);
@@ -236,12 +477,17 @@ export default function Dashboard() {
         todayRevenue: 0,
         todayVat: 0,
         todayNet: 0,
-        pendingOrders: 0,
+        preparingOrders: 0,
     });
 
     const [loading, setLoading] = useState(true);
-    const [userBranchRole, setUserBranchRole] = useState<string | null>(null);
-    const [branchRoleLoaded, setBranchRoleLoaded] = useState(false);
+        const [userBranchRole, setUserBranchRole] = useState<string | null>(null);
+        const [branchRoleLoaded, setBranchRoleLoaded] = useState(false);
+
+        // Print state — holds the full order details being reprinted
+        const [activePrintOrder, setActivePrintOrder] = useState<OrderWithDetails | null>(null);
+        const [printFormat, setPrintFormat] = useState<"thermal" | "a4">("thermal");
+        const [printing, setPrinting] = useState(false);
 
     // ── Resolve branch role first ─────────────────────────────
     // For non-staff roles, skip the branch_staff query entirely
@@ -274,17 +520,28 @@ export default function Dashboard() {
     }, [branchRoleLoaded]);
 
     // ── Price visibility ──────────────────────────────────────
-    const showPrices: boolean =
-        user?.role === "super_admin" ||
-        user?.role === "manager" ||
-        userBranchRole === "branch_manager";
+        const showPrices: boolean =
+                    user?.role === "super_admin" ||
+                    user?.role === "manager" ||
+                    userBranchRole === "branch_manager" ||
+                    userBranchRole === "cashier";
 
-    const vatRate = org?.vat_rate ?? 0;
-    const vatEnabled = vatRate > 0;
+        // Local VAT rate — starts from org, updated immediately on save
+                const [vatRate, setVatRate] = useState<number>(org?.vat_rate ?? 0);
+                const vatEnabled = vatRate > 0;
+
+                // Sync vatRate when org.vat_rate changes (e.g. after refreshOrg)
+                useEffect(() => {
+                    setVatRate(org?.vat_rate ?? 0);
+                }, [org?.vat_rate]);
 
     // ── Load all dashboard data ───────────────────────────────
-    async function loadDashboardData() {
-        setLoading(true);
+        async function loadDashboardData(overrideVatRate?: number) {
+            setLoading(true);
+
+            // Use the override if provided (e.g. right after saving), otherwise use current state
+            const effectiveVatRate = overrideVatRate ?? vatRate;
+            const effectiveVatEnabled = effectiveVatRate > 0;
 
         try {
             let branchData: Branch[] = [];
@@ -324,8 +581,10 @@ export default function Dashboard() {
                 const branchIds = branchData.map((b) => b.id);
 
                 // Restricted roles never receive price columns from server
-                const isRestricted =
-                    user?.role === "staff" && userBranchRole !== "branch_manager";
+                                const isRestricted =
+                                    user?.role === "staff" &&
+                                    userBranchRole !== "branch_manager" &&
+                                    userBranchRole !== "cashier";
 
                 const orderSelectFields = isRestricted
                     ? "id, branch_id, table_id, session_id, status, order_type, notes, created_at, updated_at"
@@ -357,9 +616,9 @@ export default function Dashboard() {
                     );
 
                     // Back-out VAT from gross revenue (tax-inclusive formula)
-                    const todayVat = vatEnabled
-                        ? todayRevenue * (vatRate / (1 + vatRate))
-                        : 0;
+                                        const todayVat = effectiveVatEnabled
+                                            ? todayRevenue * (effectiveVatRate / (1 + effectiveVatRate))
+                                            : 0;
 
                     const todayNet = todayRevenue - todayVat;
 
@@ -369,7 +628,7 @@ export default function Dashboard() {
                         todayRevenue,
                         todayVat,
                         todayNet,
-                        pendingOrders: orders.filter((o) => o.status === "pending").length,
+                        preparingOrders: orders.filter((o) => o.status === "preparing").length,
                     });
                 }
             }
@@ -377,6 +636,44 @@ export default function Dashboard() {
             if (import.meta.env.DEV) console.error("Dashboard load error:", err);
         } finally {
             setLoading(false);
+        }
+    }
+
+    // ── Print / Reprint handler ───────────────────────────────
+    // Fetches full order details (items + products + table) and
+    // triggers the browser print dialog for the selected receipt.
+    async function handlePrint(orderId: string) {
+        setPrinting(true);
+
+        try {
+            // Fetch order with items, products, and table info
+            const { data, error } = await supabase
+                .from("orders")
+                .select(`
+                    *,
+                    restaurant_tables(id, table_name, qr_identifier),
+                    order_items(*, products(id, name, base_price))
+                `)
+                .eq("id", orderId)
+                .single();
+
+            if (error || !data) {
+                toast.error("Failed to load order details for printing");
+                setPrinting(false);
+                return;
+            }
+
+            setActivePrintOrder(data as OrderWithDetails);
+
+            setTimeout(() => {
+                window.print();
+                setActivePrintOrder(null);
+                setPrinting(false);
+            }, 150);
+        } catch (err) {
+            if (import.meta.env.DEV) console.error("Print error:", err);
+            toast.error("Failed to print order");
+            setPrinting(false);
         }
     }
 
@@ -466,11 +763,11 @@ export default function Dashboard() {
                     }
                 />
                 <StatCard
-                    icon="⏳"
-                    label="Pending orders"
-                    value={stats.pendingOrders}
-                    sub="Awaiting kitchen"
-                />
+                                    icon="🍳"
+                                    label="Preparing orders"
+                                    value={stats.preparingOrders}
+                                    sub="In the kitchen"
+                                />
             </div>
 
             {/* ── VAT breakdown row (privileged roles + VAT enabled) ── */}
@@ -499,11 +796,25 @@ export default function Dashboard() {
 
             {/* ── VAT configuration (super_admin only) ──────── */}
             {user?.role === "super_admin" && org && (
-                <VatSettingsCard
-                    orgId={org.id}
-                    currentRate={org.vat_rate ?? 0}
-                />
-            )}
+                            <VatSettingsCard
+                                orgId={org.id}
+                                currentRate={org.vat_rate ?? 0}
+                                onSaved={(rate) => {
+                                                                    setVatRate(rate);
+                                                                    // Pass the new rate so stats use it immediately
+                                                                    // (avoids the stale-closure issue with setVatRate)
+                                                                    loadDashboardData(rate);
+                                                                    // Refresh org in auth context so other pages
+                                                                    // (Kitchen, Analytics, print) see the new rate
+                                                                    refreshOrg();
+                                                                }}
+                            />
+                        )}
+            
+                        {/* ── Managers (super_admin only) ────────────────────── */}
+                        {user?.role === "super_admin" && org && (
+                            <ManagersCard orgId={org.id} />
+                        )}
 
             {/* ── Setup checklist (super_admin, not done) ───── */}
             {user?.role === "super_admin" && !allDone && (
@@ -608,61 +919,118 @@ export default function Dashboard() {
                     />
                 ) : (
                     <div className="space-y-2">
-                        {recentOrders.slice(0, 10).map((order) => (
-                            <div
-                                key={order.id}
-                                className="flex items-center justify-between py-3
-                                           border-b border-gray-50 last:border-0"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <Badge className={orderStatusColor(order.status)}>
-                                        {orderStatusLabel(order.status)}
-                                    </Badge>
-                                    <div>
-                                        {showPrices && (
-                                            <p className="text-sm text-gray-700 font-medium">
-                                                {formatCurrency(order.total_amount)}
-                                            </p>
-                                        )}
-                                        <p className="text-xs text-gray-400">
-                                            {timeAgo(order.created_at)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <p className="text-xs text-gray-400 hidden sm:block">
-                                    {formatDateTime(order.created_at)}
-                                </p>
-                            </div>
-                        ))}
+                        {recentOrders.slice(0, 20).map((order) => (
+                                                    <div
+                                                        key={order.id}
+                                                        className="flex items-center justify-between py-3
+                                                                   border-b border-gray-50 last:border-0"
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <Badge className={orderStatusColor(order.status)}>
+                                                                {orderStatusLabel(order.status)}
+                                                            </Badge>
+                                                            <div>
+                                                                {showPrices && (
+                                                                    <p className="text-sm text-gray-700 font-medium">
+                                                                        {formatCurrency(order.total_amount)}
+                                                                    </p>
+                                                                )}
+                                                                <p className="text-xs text-gray-400">
+                                                                    {timeAgo(order.created_at)}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handlePrint(order.id)}
+                                                                disabled={printing}
+                                                                className="flex items-center gap-1 px-2.5 py-1.5
+                                                                           bg-gray-100 hover:bg-gray-200 text-gray-600
+                                                                           rounded-lg text-xs font-medium transition-colors
+                                                                           cursor-pointer disabled:opacity-50"
+                                                            >
+                                                                🖨️ Reprint
+                                                            </button>
+                                                            <p className="text-xs text-gray-400 hidden sm:block">
+                                                                {formatDateTime(order.created_at)}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                ))}
                     </div>
                 )}
             </div>
 
             {/* ── Analytics shortcut (super_admin + manager) ── */}
-            {(user?.role === "super_admin" || user?.role === "manager") && (
-                <div className="card bg-gradient-to-r from-green-50 to-emerald-50
-                                border-green-100">
-                    <div className="flex items-center justify-between gap-4">
-                        <div>
-                            <h2 className="text-base font-semibold text-gray-900">
-                                📊 Analytics
-                            </h2>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                                View revenue trends, top products, and order breakdowns
-                            </p>
-                        </div>
-                        <Link
-                            to="/analytics"
-                            className="flex-shrink-0 px-4 py-2 bg-green-600 text-white
-                                       text-sm font-semibold rounded-lg hover:bg-green-700
-                                       transition-colors"
-                        >
-                            Open →
-                        </Link>
-                    </div>
-                </div>
-            )}
+                        {(user?.role === "super_admin" || user?.role === "manager") && (
+                            <div className="card bg-gradient-to-r from-green-50 to-emerald-50
+                                            border-green-100">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <h2 className="text-base font-semibold text-gray-900">
+                                            📊 Analytics
+                                        </h2>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            View revenue trends, top products, and order breakdowns
+                                        </p>
+                                    </div>
+                                    <Link
+                                        to="/analytics"
+                                        className="flex-shrink-0 px-4 py-2 bg-green-600 text-white
+                                                   text-sm font-semibold rounded-lg hover:bg-green-700
+                                                   transition-colors"
+                                    >
+                                        Open →
+                                    </Link>
+                                </div>
+                            </div>
+                        )}
 
-        </div>
-    );
-}
+                        {/* ── Print format toggle ─────────────────────────────── */}
+                        <div className="flex items-center justify-end gap-1 bg-gray-100 rounded-lg p-0.5 w-fit ml-auto">
+                            <button
+                                type="button"
+                                onClick={() => setPrintFormat("thermal")}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                                    printFormat === "thermal"
+                                        ? "bg-white text-gray-900 shadow-sm"
+                                        : "text-gray-500 hover:text-gray-700"
+                                }`}
+                            >
+                                🧾 80mm
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPrintFormat("a4")}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                                    printFormat === "a4"
+                                        ? "bg-white text-gray-900 shadow-sm"
+                                        : "text-gray-500 hover:text-gray-700"
+                                }`}
+                            >
+                                📄 A4
+                            </button>
+                        </div>
+
+                        {/* ── Hidden print workspace ──────────────────────────── */}
+                        {activePrintOrder && (
+                                                    <div className="hidden print:block">
+                                                        {printFormat === "thermal" ? (
+                                                            <PrintReceipt
+                                                                order={activePrintOrder}
+                                                                orgVatRate={vatRate}
+                                                                userBranchRole={userBranchRole}
+                                                            />
+                                                        ) : (
+                                                            <A4Invoice
+                                                                order={activePrintOrder}
+                                                                orgVatRate={vatRate}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                )}
+
+                    </div>
+                );
+            }

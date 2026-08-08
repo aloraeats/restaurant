@@ -33,6 +33,7 @@ interface AuthContextValue extends AuthState {
     signIn: (opts: SignInOptions) => Promise<{ error: string | null }>;
     signUp: (opts: SignUpOptions) => Promise<{ error: string | null }>;
     signOut: () => Promise<void>;
+    refreshOrg: () => Promise<void>;
 }
 
 // ── Context ───────────────────────────────────────────────────
@@ -50,30 +51,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const loadingUserIdRef = useRef<string | null>(null);
 
     // ── Load org for a profile ────────────────────────────────
-    const loadOrgForProfile = useCallback(async (profile: Profile) => {
-        if (!profile.org_id) {
-            setState({ user: profile, org: null, loading: false });
-            return;
-        }
+        const loadOrgForProfile = useCallback(async (profile: Profile) => {
+            if (!profile.org_id) {
+                setState({ user: profile, org: null, loading: false });
+                return;
+            }
 
-        const { data: orgData, error: orgError } = await supabase
-            .from("organizations")
-            .select("*")
-            .eq("id", profile.org_id)
-            .single();
+            const { data: orgData, error: orgError } = await supabase
+                .from("organizations")
+                .select("*")
+                .eq("id", profile.org_id)
+                .single();
 
-        if (orgError) {
-            console.warn("Org load warning:", orgError.message);
-            setState({ user: profile, org: null, loading: false });
-            return;
-        }
+            if (orgError) {
+                // Log full error details so we can diagnose RLS/permission issues
+                console.error("[useAuth] Org load failed:", {
+                    code: orgError.code,
+                    message: orgError.message,
+                    details: orgError.details,
+                    hint: orgError.hint,
+                    userRole: profile.role,
+                });
+                setState({ user: profile, org: null, loading: false });
+                return;
+            }
 
-        setState({
-            user: profile,
-            org: orgData as Organization,
-            loading: false,
-        });
-    }, []);
+            setState({
+                user: profile,
+                org: orgData as Organization,
+                loading: false,
+            });
+        }, []);
 
     // ── Load profile + org ────────────────────────────────────
     const loadUserData = useCallback(async (userId: string) => {
@@ -98,28 +106,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 .single();
 
             if (profileError || !profile) {
-                if (profileError?.code === "PGRST116") {
-                    console.warn("Profile not ready, retrying in 1s...");
-                    await new Promise((r) => setTimeout(r, 1000));
+                            if (profileError?.code === "PGRST116") {
+                                console.warn("Profile not ready, retrying in 1s...");
+                                await new Promise((r) => setTimeout(r, 1000));
 
-                    const { data: retry, error: retryErr } = await supabase
-                        .from("profiles")
-                        .select("*")
-                        .eq("id", userId)
-                        .single();
+                                const { data: retry, error: retryErr } = await supabase
+                                    .from("profiles")
+                                    .select("*")
+                                    .eq("id", userId)
+                                    .single();
 
-                    if (retryErr || !retry) {
-                        if (import.meta.env.DEV) console.error("Profile load failed:", retryErr?.message);
-                        setState({ user: null, org: null, loading: false });
-                        return;
-                    }
-                    await loadOrgForProfile(retry as Profile);
-                    return;
-                }
-                if (import.meta.env.DEV) console.error("Profile error:", profileError?.message);
-                setState({ user: null, org: null, loading: false });
-                return;
-            }
+                                if (retryErr || !retry) {
+                                    console.error("[useAuth] Profile load failed after retry:", {
+                                        code: retryErr?.code,
+                                        message: retryErr?.message,
+                                        details: retryErr?.details,
+                                        hint: retryErr?.hint,
+                                    });
+                                    setState({ user: null, org: null, loading: false });
+                                    return;
+                                }
+                                await loadOrgForProfile(retry as Profile);
+                                return;
+                            }
+                            console.error("[useAuth] Profile load failed:", {
+                                code: profileError?.code,
+                                message: profileError?.message,
+                                details: profileError?.details,
+                                hint: profileError?.hint,
+                            });
+                            setState({ user: null, org: null, loading: false });
+                            return;
+                        }
 
             await loadOrgForProfile(profile as Profile);
         } catch (err) {
@@ -211,16 +229,22 @@ useEffect(() => {
                 });
 
                 if (error) {
-                    recordLoginAttempt();
-                    setState((prev) => ({ ...prev, loading: false }));
-                    if (error.message.includes("Invalid login credentials")) {
-                        return { error: "Incorrect email or password" };
-                    }
-                    if (error.message.includes("Email not confirmed")) {
-                        return { error: "Please confirm your email before signing in" };
-                    }
-                    return { error: error.message };
-                }
+                                    recordLoginAttempt();
+                                    setState((prev) => ({ ...prev, loading: false }));
+                                    // Log full error for debugging
+                                    console.error("[useAuth] Sign-in failed:", {
+                                        status: error.status,
+                                        message: error.message,
+                                        name: error.name,
+                                    });
+                                    if (error.message.includes("Invalid login credentials")) {
+                                        return { error: "Incorrect email or password" };
+                                    }
+                                    if (error.message.includes("Email not confirmed")) {
+                                        return { error: "Please confirm your email before signing in" };
+                                    }
+                                    return { error: error.message };
+                                }
 
                 clearLoginAttempts();
 
@@ -291,24 +315,48 @@ useEffect(() => {
     );
 
     // ── signOut ───────────────────────────────────────────────
-    const signOut = useCallback(async () => {
-        try {
-            setState((prev) => ({ ...prev, loading: true }));
-            localStorage.removeItem("remember_me");
-            await supabase.auth.signOut();
-        } catch (err) {
-            if (import.meta.env.DEV) console.error("Sign out error:", err);
-            setState({ user: null, org: null, loading: false });
-        }
-    }, []);
+        const signOut = useCallback(async () => {
+            try {
+                setState((prev) => ({ ...prev, loading: true }));
+                localStorage.removeItem("remember_me");
+                await supabase.auth.signOut();
+            } catch (err) {
+                if (import.meta.env.DEV) console.error("Sign out error:", err);
+                setState({ user: null, org: null, loading: false });
+            }
+        }, []);
+
+        // ── refreshOrg ────────────────────────────────────────────
+        // Re-fetches the org data from the database and updates the context.
+        // Useful after saving org-level settings (e.g. VAT rate).
+        const refreshOrg = useCallback(async () => {
+            const currentUser = state.user;
+            if (!currentUser?.org_id) return;
+
+            const { data: orgData, error: orgError } = await supabase
+                .from("organizations")
+                .select("*")
+                .eq("id", currentUser.org_id)
+                .single();
+
+            if (orgError) {
+                console.warn("refreshOrg warning:", orgError.message);
+                return;
+            }
+
+            setState((prev) => ({
+                ...prev,
+                org: orgData as Organization,
+            }));
+        }, [state.user]);
 
     return (
-        <AuthContext.Provider
-            value={{ ...state, signIn, signUp, signOut }}
-        >
-            {children}
-        </AuthContext.Provider>
-    );
+            <AuthContext.Provider
+                value={{ ...state, signIn, signUp, signOut, refreshOrg }}
+            >
+                {children}
+            </AuthContext.Provider>
+        );
 }
 
 // ── Hook ──────────────────────────────────────────────────────

@@ -14,16 +14,14 @@ interface PrintReceiptProps {
 }
 
 
-export default function PrintReceipt({ order, orgVatRate }: PrintReceiptProps) {
+export default function PrintReceipt({ order, orgVatRate, userBranchRole }: PrintReceiptProps) {
     const { user } = useAuth();
     
     // Resolve user's contextual printing view mode
     const role = user?.role; // 'super_admin' | 'manager' | 'staff'
-    const isKitchen = role === "staff" && !user?.email.includes("waiter"); // Simple mapping helper
-    const isWaiter = role === "staff" && user?.email.includes("waiter"); 
 
     const printMode: "customer" | "kitchen" | "waiter" =
-    (role === "super_admin" || role === "manager" || userBranchRole === "branch_manager")
+    (role === "super_admin" || role === "manager" || userBranchRole === "branch_manager" || userBranchRole === "cashier")
         ? "customer"
         : userBranchRole === "waiter"
         ? "waiter"

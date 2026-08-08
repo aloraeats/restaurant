@@ -99,26 +99,24 @@ export function isOrgAccessible(status: SubscriptionStatus): boolean {
 
 export function orderStatusLabel(status: OrderStatus): string {
     const labels: Record<OrderStatus, string> = {
-        pending: "Pending",
         preparing: "Preparing",
         served: "Served",
         cancelled: "Cancelled",
     };
-    return labels[status];
+    return labels[status] || "Preparing";
 }
 
 export function orderStatusColor(status: OrderStatus): string {
     const colors: Record<OrderStatus, string> = {
-        pending: "bg-yellow-100 text-yellow-800",
         preparing: "bg-blue-100 text-blue-800",
         served: "bg-green-100 text-green-800",
         cancelled: "bg-gray-100 text-gray-500",
     };
-    return colors[status];
+    return colors[status] || "bg-blue-100 text-blue-800";
 }
 
 export function isOrderCancellable(status: OrderStatus): boolean {
-    return status === "pending";
+    return false;
 }
 
 // ── Session (customer) ────────────────────────────────────────

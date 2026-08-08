@@ -31,10 +31,11 @@ function StaffRow({
     onRemove: () => void;
 }) {
     const roleColors: Record<string, string> = {
-        branch_manager: "bg-purple-100 text-purple-700",
-        kitchen: "bg-orange-100 text-orange-700",
-        waiter: "bg-blue-100 text-blue-700",
-    };
+            branch_manager: "bg-purple-100 text-purple-700",
+            kitchen: "bg-orange-100 text-orange-700",
+            waiter: "bg-blue-100 text-blue-700",
+            cashier: "bg-green-100 text-green-700",
+        };
 
     return (
         <div className="flex items-center justify-between py-3
@@ -79,9 +80,9 @@ export default function BranchDetail() {
     >([]);
     const [staffModal, setStaffModal] = useState(false);
     const [staffForm, setStaffForm] = useState({
-        email: "", password: "", full_name: "",
-        branch_role: "kitchen" as "kitchen" | "waiter" | "branch_manager",
-    });
+            email: "", password: "", full_name: "",
+            branch_role: "kitchen" as "kitchen" | "waiter" | "branch_manager" | "cashier",
+        });
     const [staffErrors, setStaffErrors] = useState<Record<string, string>>({});
     const [creatingStaff, setCreatingStaff] = useState(false);
     const [removingStaff, setRemovingStaff] = useState<string | null>(null);
@@ -879,10 +880,11 @@ export default function BranchDetail() {
                                        focus:ring-green-500 bg-white"
                         >
                             <option value="kitchen">Kitchen Staff</option>
-                            <option value="waiter">Waiter</option>
-                            {user?.role === "super_admin" && (
-                                <option value="branch_manager">Branch Manager</option>
-                            )}
+                                                        <option value="waiter">Waiter</option>
+                                                        <option value="cashier">Cashier</option>
+                                                        {user?.role === "super_admin" && (
+                                                            <option value="branch_manager">Branch Manager</option>
+                                                        )}
                         </select>
                     </div>
                 </div>

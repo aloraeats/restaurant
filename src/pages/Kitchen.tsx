@@ -22,6 +22,7 @@ import {
     getLocationBadgeDetails,
 } from "../utils/helpers";
 import PrintReceipt from "../components/PrintReceipt";
+import A4Invoice from "../components/A4Invoice";
 import type { Order, OrderItem, Product, RestaurantTable, Branch } from "../lib/types";
 
 // ── Types ──────────────────────────────────────────────────────
@@ -49,12 +50,8 @@ function OrderCard({
     onPrint: (order: OrderWithDetails) => void;
 }) {
     const isUpdating = updating === order.id;
-    const minutesOld = Math.floor(
-        (Date.now() - new Date(order.created_at).getTime()) / 60000
-    );
-    const isUrgent = minutesOld >= 30 && order.status === "pending";
 
-    // Parse location type from note metadata tags
+        // Parse location type from note metadata tags
     const resolvedLocation = parseOrderTypeFromNotes(
         order.notes,
         order.order_type as "dine_in" | "kiosk"
@@ -77,22 +74,9 @@ function OrderCard({
     })();
 
     return (
-        <div className={`
-            card flex flex-col gap-3 relative overflow-hidden
-            ${order.status === "served" ? "opacity-60" : ""}
-            ${order.status === "cancelled" ? "opacity-40" : ""}
-            ${isUrgent ? "border-red-300 border-2" : ""}
-        `}>
-            {/* Urgent bar */}
-            {isUrgent && (
-                <div className="absolute top-0 left-0 right-0 bg-red-500 text-white
-                        text-xs text-center py-1 font-medium z-10">
-                    ⚠️ Waiting {minutesOld} minutes!
-                </div>
-            )}
-
-            {/* Header */}
-            <div className={`flex items-start justify-between gap-2 ${isUrgent ? "mt-5" : ""}`}>
+            <div className="card flex flex-col gap-3 relative overflow-hidden">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                     {/* Station label + status + location badges */}
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -175,56 +159,46 @@ function OrderCard({
                 )}
 
                 {/* Status action buttons */}
-                {canUpdate && order.status !== "cancelled" && order.status !== "served" && (
-                    <div className="flex gap-2">
-                        {/* Waiter: only mark served when preparing */}
-                        {isWaiter && order.status === "preparing" && (
-                            <Button
-                                fullWidth
-                                size="sm"
-                                onClick={() => onStatusChange(order.id, "served")}
-                                loading={isUpdating}
-                            >
-                                ✅ Mark Served
-                            </Button>
-                        )}
+                                {canUpdate && order.status !== "cancelled" && order.status !== "served" && (
+                                    <div className="flex gap-2">
+                                        {/* Waiter: only mark served when preparing */}
+                                        {isWaiter && order.status === "preparing" && (
+                                            <Button
+                                                fullWidth
+                                                size="sm"
+                                                onClick={() => onStatusChange(order.id, "served")}
+                                                loading={isUpdating}
+                                            >
+                                                ✅ Mark Served
+                                            </Button>
+                                        )}
 
-                        {/* Admin / manager / branch_manager: full control */}
-                        {!isWaiter && (
-                            <>
-                                {order.status === "pending" && (
-                                    <Button
-                                        fullWidth
-                                        size="sm"
-                                        onClick={() => onStatusChange(order.id, "preparing")}
-                                        loading={isUpdating}
-                                    >
-                                        🍳 Start Preparing
-                                    </Button>
+                                        {/* Admin / manager / branch_manager / cashier: mark served or cancel */}
+                                        {!isWaiter && (
+                                            <>
+                                                {order.status === "preparing" && (
+                                                    <Button
+                                                        fullWidth
+                                                        size="sm"
+                                                        onClick={() => onStatusChange(order.id, "served")}
+                                                        loading={isUpdating}
+                                                    >
+                                                        ✅ Mark Served
+                                                    </Button>
+                                                )}
+                                                <Button
+                                                    size="sm"
+                                                    variant="danger"
+                                                    onClick={() => onStatusChange(order.id, "cancelled")}
+                                                    loading={isUpdating}
+                                                    disabled={isUpdating}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            </>
+                                        )}
+                                    </div>
                                 )}
-                                {order.status === "preparing" && (
-                                    <Button
-                                        fullWidth
-                                        size="sm"
-                                        onClick={() => onStatusChange(order.id, "served")}
-                                        loading={isUpdating}
-                                    >
-                                        ✅ Mark Served
-                                    </Button>
-                                )}
-                                <Button
-                                    size="sm"
-                                    variant="danger"
-                                    onClick={() => onStatusChange(order.id, "cancelled")}
-                                    loading={isUpdating}
-                                    disabled={isUpdating}
-                                >
-                                    Cancel
-                                </Button>
-                            </>
-                        )}
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -237,45 +211,95 @@ export default function Kitchen() {
     const [orders, setOrders] = useState<OrderWithDetails[]>([]);
     const [branches, setBranches] = useState<Branch[]>([]);
     const [selectedBranch, setSelectedBranch] = useState<string>("all");
-    const [statusFilter, setStatusFilter] = useState<string>("active");
+    // Kitchen shows preparing (being cooked) orders
+            const statusFilter = "active";
     const [loading, setLoading] = useState(true);
     const [updating, setUpdating] = useState<string | null>(null);
     const [userBranchRole, setUserBranchRole] = useState<string | null>(null);
 
     // Print state — holds the order currently being printed
-    const [activePrintOrder, setActivePrintOrder] = useState<OrderWithDetails | null>(null);
+        const [activePrintOrder, setActivePrintOrder] = useState<OrderWithDetails | null>(null);
+        const [printFormat, setPrintFormat] = useState<"thermal" | "a4">("thermal");
 
     const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-    // ── Derived role flags ─────────────────────────────────────
-    const showPrices: boolean =
-        user?.role === "super_admin" ||
-        user?.role === "manager" ||
-        userBranchRole === "branch_manager";
+    // ── Branch role loaded flag ────────────────────────────────
+        // Prevents loadOrders and realtime from running before
+        // the user's branch role is resolved (avoids race conditions).
+        const [branchRoleLoaded, setBranchRoleLoaded] = useState(false);
 
-    const effectiveCanUpdate =
-        ["super_admin", "manager"].includes(user?.role || "") ||
-        userBranchRole === "waiter" ||
-        userBranchRole === "branch_manager";
+        // ── Derived role flags ─────────────────────────────────────
+            const showPrices: boolean =
+                user?.role === "super_admin" ||
+                user?.role === "manager" ||
+                userBranchRole === "branch_manager" ||
+                userBranchRole === "cashier";
 
-    const effectiveIsWaiter = userBranchRole === "waiter";
+            const effectiveCanUpdate =
+                ["super_admin", "manager"].includes(user?.role || "") ||
+                userBranchRole === "waiter" ||
+                userBranchRole === "branch_manager" ||
+                userBranchRole === "cashier";
 
-    // ── Effects ────────────────────────────────────────────────
-    useEffect(() => {
-        if (org) {
-            loadBranches();
-            checkUserBranchRole();
-        }
-    }, [org]);
+            const effectiveIsWaiter = userBranchRole === "waiter";
 
-    useEffect(() => {
-        if (!org || !user) return;
-        loadOrders();
-        setupRealtime();
-        return () => {
-            realtimeRef.current?.unsubscribe();
-        };
-    }, [selectedBranch, statusFilter, branches, userBranchRole]);
+        // ── Initial setup: load branches, check role ───────────────
+        useEffect(() => {
+            if (org) {
+                loadBranches();
+                checkUserBranchRole();
+            }
+        }, [org]);
+
+        // ── Load orders when filters or branches change ──────────
+                // Only runs after branch role is confirmed so that the
+                // correct price visibility is applied from the start.
+                // `branches` is included as a dependency to prevent a race
+                // condition where loadOrders() runs before loadBranches()
+                // completes, resulting in an empty branch list and zero orders.
+                useEffect(() => {
+                                    if (!org || !user || !branchRoleLoaded) return;
+                                    loadOrders();
+                                }, [selectedBranch, branchRoleLoaded, branches]);
+
+        // ── Realtime subscription (once, stable) ──────────────────
+            // Set up once after branch role is known. Never recreated
+            // on filter/branch changes — avoids dropped connections.
+            useEffect(() => {
+                if (!branchRoleLoaded) return;
+
+                const channel = supabase
+                    .channel(`kitchen-orders-${Date.now()}`)
+                    .on(
+                        "postgres_changes",
+                        {
+                            event: "*",
+                            schema: "public",
+                            table: "orders",
+                        },
+                        (payload) => {
+                            if (payload.eventType === "INSERT") {
+                                loadOrders();
+                                toast.info("🛎️ New order received!");
+                            } else if (payload.eventType === "UPDATE") {
+                                const updated = payload.new as Order;
+                                setOrders((prev) =>
+                                    prev.map((o) =>
+                                        o.id === updated.id ? { ...o, ...updated } : o
+                                    )
+                                );
+                            }
+                        }
+                    )
+                    .subscribe();
+
+                realtimeRef.current = channel;
+
+                return () => {
+                    channel.unsubscribe();
+                    realtimeRef.current = null;
+                };
+            }, [branchRoleLoaded]);
 
     // ── Data loaders ───────────────────────────────────────────
     async function loadBranches() {
@@ -290,128 +314,216 @@ export default function Kitchen() {
     }
 
     async function checkUserBranchRole() {
-        if (!user) return;
-        const { data } = await supabase
-            .from("branch_staff")
-            .select("role")
-            .eq("profile_id", user.id)
-            .limit(1)
-            .maybeSingle();
-        setUserBranchRole(data?.role || null);
-    }
+            if (!user) {
+                setBranchRoleLoaded(true);
+                return;
+            }
+            // Non-staff roles don't have a branch role — mark loaded immediately
+            if (user.role !== "staff") {
+                setBranchRoleLoaded(true);
+                return;
+            }
+            const { data } = await supabase
+                .from("branch_staff")
+                .select("role")
+                .eq("profile_id", user.id)
+                .limit(1)
+                .maybeSingle();
+            setUserBranchRole(data?.role || null);
+            setBranchRoleLoaded(true);
+        }
 
     async function loadOrders() {
-        setLoading(true);
+            setLoading(true);
 
-        // Determine which branch IDs to query
-        let branchIds: string[] = [];
+            // Determine which branch IDs to query
+            let branchIds: string[] = [];
 
-        if (selectedBranch === "all") {
-            if (["super_admin", "manager"].includes(user?.role || "")) {
-                branchIds = branches.map((b) => b.id);
+            if (selectedBranch === "all") {
+                if (["super_admin", "manager"].includes(user?.role || "")) {
+                    branchIds = branches.map((b) => b.id);
+                } else {
+                    const { data: assigned } = await supabase
+                        .from("branch_staff")
+                        .select("branch_id")
+                        .eq("profile_id", user!.id);
+                    branchIds = (assigned || []).map((a) => a.branch_id);
+                }
             } else {
-                const { data: assigned } = await supabase
-                    .from("branch_staff")
-                    .select("branch_id")
-                    .eq("profile_id", user!.id);
-                branchIds = (assigned || []).map((a) => a.branch_id);
+                branchIds = [selectedBranch];
             }
-        } else {
-            branchIds = [selectedBranch];
-        }
 
-        if (branchIds.length === 0) {
-            setOrders([]);
+            if (branchIds.length === 0) {
+                setOrders([]);
+                setLoading(false);
+                return;
+            }
+
+            // Restricted roles (kitchen, waiter) must use the staff views
+            // because RLS blocks direct SELECT on the orders table for these roles.
+            // The views strip price columns (total_amount, unit_price) for security.
+            const isRestricted =
+                user?.role === "staff" && userBranchRole !== "branch_manager" && userBranchRole !== "cashier";
+
+            if (isRestricted) {
+                await loadOrdersRestricted(branchIds);
+            } else {
+                await loadOrdersUnrestricted(branchIds);
+            }
+
             setLoading(false);
-            return;
         }
 
-        // Restricted roles never receive price columns from the server.
-        // Defaults to restricted when userBranchRole is still null —
-        // prices are never accidentally exposed during loading.
-        const isRestricted =
-            user?.role === "staff" && userBranchRole !== "branch_manager";
+        // ── Load orders for restricted roles (kitchen, waiter) ─────
+        // Uses orders_staff_view and order_items_staff_view to bypass
+        // RLS restrictions on the orders table for non-price roles.
+        async function loadOrdersRestricted(branchIds: string[]) {
+            try {
+                // Step 1: Fetch orders from the staff view
+                let query = supabase
+                    .from("orders_staff_view")
+                    .select(`
+                        id,
+                        branch_id,
+                        table_id,
+                        session_id,
+                        status,
+                        order_type,
+                        notes,
+                        created_at,
+                        updated_at
+                    `)
+                    .in("branch_id", branchIds)
+                    .order("created_at", { ascending: true });
 
-        const selectFields = isRestricted
-            ? `
-                id,
-                branch_id,
-                table_id,
-                session_id,
-                status,
-                order_type,
-                notes,
-                created_at,
-                updated_at,
-                restaurant_tables(id, table_name, qr_identifier),
-                order_items(
-                    id, order_id, product_id, quantity, notes, created_at,
-                    products(id, name, base_price)
-                )
-              `
-            : `
+                if (statusFilter === "active") {
+                    query = query.in("status", ["preparing"]);
+                } else if (statusFilter !== "all") {
+                    query = query.eq("status", statusFilter);
+                }
+
+                query = query.limit(100);
+
+                const { data: ordersData, error: ordersError } = await query;
+
+                if (ordersError) {
+                    toast.error("Failed to load orders");
+                    setOrders([]);
+                    return;
+                }
+
+                const rawOrders = (ordersData || []) as any[];
+
+                if (rawOrders.length === 0) {
+                    setOrders([]);
+                    return;
+                }
+
+                // Step 2: Get order IDs to fetch items
+                const orderIds = rawOrders.map((o) => o.id);
+
+                // Step 3: Fetch order items + products from the staff view
+                const { data: itemsData, error: itemsError } = await supabase
+                    .from("order_items_staff_view")
+                    .select(`
+                        id,
+                        order_id,
+                        product_id,
+                        quantity,
+                        notes,
+                        created_at,
+                        products (
+                            id,
+                            name,
+                            base_price
+                        )
+                    `)
+                    .in("order_id", orderIds)
+                    .order("created_at", { ascending: true });
+
+                if (itemsError) {
+                    toast.error("Failed to load order items");
+                    setOrders([]);
+                    return;
+                }
+
+                const rawItems = (itemsData || []) as any[];
+
+                // Step 4: Group items by order_id
+                const itemsByOrderId: Record<string, any[]> = {};
+                for (const item of rawItems) {
+                    if (!itemsByOrderId[item.order_id]) {
+                        itemsByOrderId[item.order_id] = [];
+                    }
+                    itemsByOrderId[item.order_id].push(item);
+                }
+
+                // Step 5: Fetch table info for dine-in orders
+                const tableIds = rawOrders
+                    .filter((o) => o.table_id)
+                    .map((o) => o.table_id);
+
+                let tablesById: Record<string, any> = {};
+                if (tableIds.length > 0) {
+                    const { data: tablesData } = await supabase
+                        .from("restaurant_tables")
+                        .select("id, table_name, qr_identifier")
+                        .in("id", tableIds);
+                    if (tablesData) {
+                        for (const t of tablesData as any[]) {
+                            tablesById[t.id] = t;
+                        }
+                    }
+                }
+
+                // Step 6: Assemble into OrderWithDetails shape
+                const assembled = rawOrders.map((o) => ({
+                    ...o,
+                    total_amount: 0, // placeholder — not shown for restricted roles
+                    order_items: itemsByOrderId[o.id] || [],
+                    restaurant_tables: o.table_id ? (tablesById[o.table_id] || null) : null,
+                })) as OrderWithDetails[];
+
+                setOrders(assembled);
+
+            } catch (err) {
+                if (import.meta.env.DEV) console.error("loadOrdersRestricted error:", err);
+                toast.error("Failed to load orders");
+                setOrders([]);
+            }
+        }
+
+        // ── Load orders for unrestricted roles (super_admin, manager, branch_manager, cashier) ─────
+        async function loadOrdersUnrestricted(branchIds: string[]) {
+            const selectFields = `
                 *,
                 restaurant_tables(id, table_name, qr_identifier),
                 order_items(*, products(id, name, base_price))
-              `;
+            `;
 
-        let query = supabase
-            .from("orders")
-            .select(selectFields)
-            .in("branch_id", branchIds)
-            .order("created_at", { ascending: true });
+            let query = supabase
+                .from("orders")
+                .select(selectFields)
+                .in("branch_id", branchIds)
+                .order("created_at", { ascending: true });
 
-        if (statusFilter === "active") {
-            query = query.in("status", ["pending", "preparing"]);
-        } else if (statusFilter !== "all") {
-            query = query.eq("status", statusFilter);
+            if (statusFilter === "active") {
+                query = query.in("status", ["preparing"]);
+            } else if (statusFilter !== "all") {
+                query = query.eq("status", statusFilter);
+            }
+
+            query = query.limit(100);
+
+            const { data, error } = await query;
+
+            if (error) {
+                toast.error("Failed to load orders");
+                setOrders([]);
+            } else {
+                setOrders((data as OrderWithDetails[]) || []);
+            }
         }
-
-        query = query.limit(100);
-
-        const { data, error } = await query;
-
-        if (error) {
-            toast.error("Failed to load orders");
-        } else {
-            setOrders((data as OrderWithDetails[]) || []);
-        }
-
-        setLoading(false);
-    }
-
-    // ── Realtime subscription ──────────────────────────────────
-    function setupRealtime() {
-        realtimeRef.current?.unsubscribe();
-
-        realtimeRef.current = supabase
-            .channel("kitchen-orders")
-            .on(
-                "postgres_changes",
-                {
-                    event: "*",
-                    schema: "public",
-                    table: "orders",
-                },
-                (payload) => {
-                    if (payload.eventType === "INSERT") {
-                        loadOrders();
-                        const newOrder = payload.new as Order;
-                        if (newOrder.status === "pending") {
-                            toast.info("🛎️ New order received!");
-                        }
-                    } else if (payload.eventType === "UPDATE") {
-                        const updated = payload.new as Order;
-                        setOrders((prev) =>
-                            prev.map((o) =>
-                                o.id === updated.id ? { ...o, ...updated } : o
-                            )
-                        );
-                    }
-                }
-            )
-            .subscribe();
-    }
 
     // ── Update order status ────────────────────────────────────
     async function handleStatusChange(orderId: string, newStatus: string) {
@@ -454,25 +566,13 @@ export default function Kitchen() {
         }, 150);
     }
 
-    // ── Group orders into kanban columns ───────────────────────
-    const pendingOrders = orders.filter((o) => o.status === "pending");
-    const preparingOrders = orders.filter((o) => o.status === "preparing");
-    const servedOrders = orders.filter((o) => o.status === "served");
-    const cancelledOrders = orders.filter((o) => o.status === "cancelled");
+    // ── Group orders into active list ─────────────────────
+                const activeOrders = orders.filter((o) => o.status === "preparing");
 
     const branchOptions = [
-        { value: "all", label: "All Branches" },
-        ...branches.map((b) => ({ value: b.id, label: b.name })),
-    ];
-
-    const statusOptions = [
-        { value: "active", label: "Active Orders (Pending + Preparing)" },
-        { value: "all", label: "All Orders" },
-        { value: "pending", label: "Pending Only" },
-        { value: "preparing", label: "Preparing Only" },
-        { value: "served", label: "Served" },
-        { value: "cancelled", label: "Cancelled" },
-    ];
+            { value: "all", label: "All Branches" },
+            ...branches.map((b) => ({ value: b.id, label: b.name })),
+        ];
 
     // ── Render ─────────────────────────────────────────────────
     return (
@@ -497,24 +597,43 @@ export default function Kitchen() {
                 <div className="flex gap-3 flex-wrap">
                     {["super_admin", "manager"].includes(user?.role || "") && (
                         <div className="w-44">
-                            <Select
-                                options={branchOptions}
-                                value={selectedBranch}
-                                onChange={(e) => setSelectedBranch(e.target.value)}
-                            />
-                        </div>
-                    )}
-                    <div className="w-64">
-                        <Select
-                            options={statusOptions}
-                            value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value)}
-                        />
-                    </div>
-                    <Button variant="secondary" onClick={loadOrders} size="sm">
-                        🔄 Refresh
-                    </Button>
-                </div>
+                                                    <Select
+                                                        options={branchOptions}
+                                                        value={selectedBranch}
+                                                        onChange={(e) => setSelectedBranch(e.target.value)}
+                                                    />
+                                                </div>
+                                            )}
+                                            <Button variant="secondary" onClick={loadOrders} size="sm">
+                                                                    🔄 Refresh
+                                                                </Button>
+
+                                        {/* Print format toggle */}
+                                        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setPrintFormat("thermal")}
+                                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                                                    printFormat === "thermal"
+                                                        ? "bg-white text-gray-900 shadow-sm"
+                                                        : "text-gray-500 hover:text-gray-700"
+                                                }`}
+                                            >
+                                                🧾 80mm
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setPrintFormat("a4")}
+                                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                                                    printFormat === "a4"
+                                                        ? "bg-white text-gray-900 shadow-sm"
+                                                        : "text-gray-500 hover:text-gray-700"
+                                                }`}
+                                            >
+                                                📄 A4
+                                            </button>
+                                        </div>
+                                    </div>
             </div>
 
             {/* Board */}
@@ -529,125 +648,59 @@ export default function Kitchen() {
                     description="Orders will appear here in real-time when customers place them"
                 />
             ) : (
-                <div className="grid lg:grid-cols-3 gap-6">
+                            <div className="grid lg:grid-cols-2 gap-6">
 
-                    {/* Pending column */}
-                    <div>
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className="w-3 h-3 rounded-full bg-yellow-400" />
-                            <h2 className="font-semibold text-gray-700 text-sm">
-                                Pending ({pendingOrders.length})
-                            </h2>
-                        </div>
-                        <div className="space-y-4">
-                            {pendingOrders.length === 0 ? (
-                                <p className="text-center text-gray-300 py-8 text-sm">
-                                    No pending orders
-                                </p>
-                            ) : (
-                                pendingOrders.map((order) => (
-                                    <OrderCard
-                                        key={order.id}
-                                        order={order}
-                                        canUpdate={effectiveCanUpdate}
-                                        isWaiter={effectiveIsWaiter}
-                                        showPrices={showPrices}
-                                        onStatusChange={handleStatusChange}
-                                        updating={updating}
-                                        onPrint={handlePrint}
-                                    />
-                                ))
-                            )}
-                        </div>
-                    </div>
+                                                            {/* Preparing orders */}
+                                                <div className="lg:col-span-2">
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <div className="w-3 h-3 rounded-full bg-blue-400" />
+                                                        <h2 className="font-semibold text-gray-700 text-sm">
+                                                            Preparing ({activeOrders.length})
+                                                        </h2>
+                                                    </div>
+                                                    <div className="grid md:grid-cols-2 gap-4">
+                                                        {activeOrders.length === 0 ? (
+                                                                                                                    <p className="text-center text-gray-300 py-8 text-sm md:col-span-2">
+                                                                                                                        Nothing in preparation
+                                                                                                                    </p>
+                                                                                                                ) : (
+                                                                                                                    activeOrders.map((order) => (
+                                                                <OrderCard
+                                                                    key={order.id}
+                                                                    order={order}
+                                                                    canUpdate={effectiveCanUpdate}
+                                                                    isWaiter={effectiveIsWaiter}
+                                                                    showPrices={showPrices}
+                                                                    onStatusChange={handleStatusChange}
+                                                                    updating={updating}
+                                                                    onPrint={handlePrint}
+                                                                />
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </div>
 
-                    {/* Preparing column */}
-                    <div>
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className="w-3 h-3 rounded-full bg-blue-400" />
-                            <h2 className="font-semibold text-gray-700 text-sm">
-                                Preparing ({preparingOrders.length})
-                            </h2>
-                        </div>
-                        <div className="space-y-4">
-                            {preparingOrders.length === 0 ? (
-                                <p className="text-center text-gray-300 py-8 text-sm">
-                                    Nothing in preparation
-                                </p>
-                            ) : (
-                                preparingOrders.map((order) => (
-                                    <OrderCard
-                                        key={order.id}
-                                        order={order}
-                                        canUpdate={effectiveCanUpdate}
-                                        isWaiter={effectiveIsWaiter}
-                                        showPrices={showPrices}
-                                        onStatusChange={handleStatusChange}
-                                        updating={updating}
-                                        onPrint={handlePrint}
-                                    />
-                                ))
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Served + Cancelled column */}
-                    <div>
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className="w-3 h-3 rounded-full bg-green-400" />
-                            <h2 className="font-semibold text-gray-700 text-sm">
-                                Served ({servedOrders.length})
-                            </h2>
-                        </div>
-                        <div className="space-y-4">
-                            {servedOrders.length === 0 && cancelledOrders.length === 0 ? (
-                                <p className="text-center text-gray-300 py-8 text-sm">
-                                    None yet
-                                </p>
-                            ) : (
-                                <>
-                                    {servedOrders.map((order) => (
-                                        <OrderCard
-                                            key={order.id}
-                                            order={order}
-                                            canUpdate={false}
-                                            isWaiter={effectiveIsWaiter}
-                                            showPrices={showPrices}
-                                            onStatusChange={handleStatusChange}
-                                            updating={updating}
-                                            onPrint={handlePrint}
-                                        />
-                                    ))}
-                                    {cancelledOrders.map((order) => (
-                                        <OrderCard
-                                            key={order.id}
-                                            order={order}
-                                            canUpdate={false}
-                                            isWaiter={effectiveIsWaiter}
-                                            showPrices={showPrices}
-                                            onStatusChange={handleStatusChange}
-                                            updating={updating}
-                                            onPrint={handlePrint}
-                                        />
-                                    ))}
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                                            </div>
             )}
 
-            {/* Hidden thermal print workspace */}
-            {/* Rendered off-screen, becomes the only visible element during window.print() */}
-            {activePrintOrder && (
-                <div className="hidden print:block">
-                    <PrintReceipt
-                        order={activePrintOrder}
-                        orgVatRate={org?.vat_rate ?? 0}
-                        userBranchRole={userBranchRole}
-                    />
-                </div>
-            )}
+            {/* Hidden print workspace */}
+                        {/* Rendered off-screen, becomes the only visible element during window.print() */}
+                        {activePrintOrder && (
+                            <div className="hidden print:block">
+                                {printFormat === "thermal" ? (
+                                    <PrintReceipt
+                                        order={activePrintOrder}
+                                        orgVatRate={org?.vat_rate ?? 0}
+                                        userBranchRole={userBranchRole}
+                                    />
+                                ) : (
+                                    <A4Invoice
+                                        order={activePrintOrder}
+                                        orgVatRate={org?.vat_rate ?? 0}
+                                    />
+                                )}
+                            </div>
+                        )}
 
         </div>
     );

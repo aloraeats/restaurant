@@ -1,6 +1,7 @@
 // ============================================================
 // Layout.tsx
-// Fixed: null-safe org checks, staff role handled properly
+// Fixed: KioskNavLink + AnalyticsNavLink moved outside Layout
+// to prevent React from remounting them on every render
 // ============================================================
 import { supabase } from "../lib/supabase";
 import { useState, useEffect } from "react";
@@ -42,32 +43,19 @@ const NAV_ITEMS: NavItem[] = [
         icon: "👨‍🍳",
         roles: ["super_admin", "manager", "staff"],
     },
-
     {
         href: "/analytics",
         label: "Analytics",
         icon: "📊",
         roles: ["super_admin", "manager"],
     },
-
-    
 ];
 
-interface LayoutProps {
-    children: React.ReactNode;
-}
-
-export default function Layout({ children }: LayoutProps) {
-    const { user, org, loading, signOut } = useAuth();
-    const location = useLocation();
-    const navigate = useNavigate();
-    const [sidebarOpen, setSidebarOpen] = useState(false);
-
 // ── Kiosk nav link ────────────────────────────────────────────
+// Defined OUTSIDE Layout — KioskNavLink is its own component.
 // Kiosk requires a branchId in the URL so it can't be a static
-// NAV_ITEMS entry. For super_admin and manager we link to
-// /branches so they can pick a branch first. For staff we fetch
-// their first assigned branch and link directly to the kiosk.
+// NAV_ITEMS entry. Only staff roles see this link.
+// super_admin and manager never see it — they don't use the kiosk.
 function KioskNavLink({
     role,
     userId,
@@ -81,23 +69,33 @@ function KioskNavLink({
     const [kioskHref, setKioskHref] = useState<string | null>(null);
 
     useEffect(() => {
-        // Only staff roles get the kiosk link
-        if (role !== "staff") return;
+            if (role !== "staff") return;
 
-        supabase
-            .from("branch_staff")
-            .select("branch_id")
-            .eq("profile_id", userId)
-            .limit(1)
-            .maybeSingle()
-            .then(({ data }) => {
-                if (data?.branch_id) {
-                    setKioskHref(`/kiosk/${data.branch_id}`);
-                }
-            });
-    }, [role, userId]);
+            console.log("[KioskNavLink] Fetching branch for userId:", userId);
 
-    // super_admin and manager never see this link
+            supabase
+                .from("branch_staff")
+                .select("branch_id")
+                .eq("profile_id", userId)
+                .limit(1)
+                .maybeSingle()
+                .then(({ data, error }) => {
+                    console.log("[KioskNavLink] Result:", { data, error });
+                    if (error) {
+                        console.error("[KioskNavLink] Query error:", error);
+                        return;
+                    }
+                    if (data?.branch_id) {
+                        setKioskHref(`/kiosk/${data.branch_id}`);
+                    } else {
+                        console.warn("[KioskNavLink] No branch_staff row found for this user");
+                    }
+                })
+                .catch((err) => {
+                    console.error("[KioskNavLink] Unexpected error:", err);
+                });
+        }, [role, userId]);
+
     if (role !== "staff" || !kioskHref) return null;
 
     const isActive = location.pathname.startsWith("/kiosk");
@@ -121,6 +119,70 @@ function KioskNavLink({
     );
 }
 
+// ── Analytics nav link for branch managers ────────────────────
+// Branch managers (org role "staff" + branch role "branch_manager")
+// need access to analytics, but since their org role is "staff",
+// the static NAV_ITEMS filter won't include it. This component
+// fetches their branch role and shows the link accordingly.
+function AnalyticsNavLink({
+    role,
+    userId,
+    onNavigate,
+}: {
+    role: OrgRole;
+    userId: string;
+    onNavigate: () => void;
+}) {
+    const location = useLocation();
+    const [isBranchManager, setIsBranchManager] = useState(false);
+
+    useEffect(() => {
+        if (role !== "staff") return;
+        supabase
+            .from("branch_staff")
+            .select("role")
+            .eq("profile_id", userId)
+            .eq("role", "branch_manager")
+            .limit(1)
+            .maybeSingle()
+            .then(({ data }) => {
+                setIsBranchManager(!!data);
+            });
+    }, [role, userId]);
+
+    if (role !== "staff" || !isBranchManager) return null;
+
+    const isActive = location.pathname.startsWith("/analytics");
+
+    return (
+        <Link
+            to="/analytics"
+            onClick={onNavigate}
+            className={`
+                flex items-center gap-3 px-3 py-2.5 rounded-lg
+                text-sm font-medium transition-colors
+                ${isActive
+                    ? "bg-green-50 text-green-700"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                }
+            `}
+        >
+            <span className="text-base">📊</span>
+            Analytics
+        </Link>
+    );
+}
+
+interface LayoutProps {
+    children: React.ReactNode;
+}
+
+export default function Layout({ children }: LayoutProps) {
+    const { user, org, loading, signOut } = useAuth();
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
     // ── Auth loading ──────────────────────────────────────────
     if (loading) {
         return (
@@ -131,18 +193,15 @@ function KioskNavLink({
     }
 
     // ── Not logged in ─────────────────────────────────────────
-    // ProtectedRoute in App.tsx handles the redirect —
-    // we just return null here to avoid rendering with no user
     if (!user) return null;
 
     const role = user.role;
     const visibleNav = NAV_ITEMS.filter((item) => item.roles.includes(role));
 
-    // ✅ Null-safe org check — staff may not have org loaded
-    // Only block access if org EXISTS and is explicitly expired
+    // ✅ Null-safe org check
     const orgBlocked = org
         ? !isOrgAccessible(org.subscription_status)
-        : false; // If org is null, don't block — let pages handle it
+        : false;
 
     async function handleSignOut() {
         await signOut();
@@ -172,7 +231,6 @@ function KioskNavLink({
                     <span className="text-2xl">🍽️</span>
                     <div className="min-w-0">
                         <p className="font-bold text-gray-900 text-sm truncate">
-                            {/* ✅ Null-safe — org can be null for staff */}
                             {org?.name || user.full_name || "Restaurant"}
                         </p>
                         <p className="text-xs text-gray-400 capitalize">
@@ -208,13 +266,19 @@ function KioskNavLink({
                         );
                     })}
 
-                     {/* Kiosk — dynamic href based on role */}
+                    {/* Kiosk — staff only, dynamic href */}
                     <KioskNavLink
                         role={role}
                         userId={user.id}
                         onNavigate={() => setSidebarOpen(false)}
                     />
 
+                    {/* Analytics — branch managers need dynamic link */}
+                    <AnalyticsNavLink
+                        role={role}
+                        userId={user.id}
+                        onNavigate={() => setSidebarOpen(false)}
+                    />
                 </nav>
 
                 {/* User footer */}
@@ -251,7 +315,6 @@ function KioskNavLink({
                 {/* Top bar */}
                 <header className="sticky top-0 z-10 bg-white border-b border-gray-100
                                    flex items-center justify-between px-4 py-3">
-                    {/* Mobile hamburger */}
                     <button
                         onClick={() => setSidebarOpen(true)}
                         className="lg:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100"
@@ -272,7 +335,6 @@ function KioskNavLink({
                         )?.label || "Dashboard"}
                     </h1>
 
-                    {/* ✅ Null-safe — only show if org exists and is suspended */}
                     {org?.subscription_status === "suspended" && (
                         <span className="text-xs bg-yellow-100 text-yellow-700
                                          px-3 py-1 rounded-full font-medium">
